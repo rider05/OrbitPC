@@ -28,6 +28,7 @@ export default function ComputerDashboard() {
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState('');
   const [clip, setClip] = useState('');
+  const [appId, setAppId] = useState('');
   const [reauthPw, setReauthPw] = useState('');
   const [needsReauth, setNeedsReauth] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
@@ -162,7 +163,9 @@ export default function ComputerDashboard() {
       <Text style={styles.section}>Status & quick actions (M2a)</Text>
       <ActionButton title="Refresh status" onPress={() => submit('system.getStatus')} loading={sending} />
       <ActionButton title="🔒 Lock PC" onPress={() => submit('system.lock')} loading={sending} />
-      <ActionButton title="▶ Launch approved app" onPress={() => submit('app.launch', { appId: 'approved-app-1' })} loading={sending} />
+      <Text style={styles.label}>Approved app ID (as shown in the PC tray app)</Text>
+      <TextInput style={styles.input} value={appId} onChangeText={setAppId} placeholder="e.g. notepad" placeholderTextColor={colors.muted} autoCapitalize="none" />
+      <ActionButton title="▶ Launch approved app" onPress={() => submit('app.launch', { appId: appId.trim() })} disabled={appId.trim().length === 0} loading={sending} />
       <Muted>app.launch uses an immutable approved-app ID. Raw paths are never sent from this app.</Muted>
 
       <Text style={styles.section}>Power (M2b — confirm required)</Text>

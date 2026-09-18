@@ -107,7 +107,11 @@ export async function servePairingPage(
   return { server, url };
 }
 
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
+  if (process.env.ORBITPC_NO_BROWSER === "1") {
+    console.log(`[pair] browser open suppressed (ORBITPC_NO_BROWSER=1): ${url}`);
+    return;
+  }
   const plat = process.platform;
   try {
     if (plat === "win32") execFile("cmd", ["/c", "start", "", url]);

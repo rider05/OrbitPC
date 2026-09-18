@@ -14,8 +14,8 @@ export function getApiUrl(): string {
 
 /**
  * Mock mode: ON when no real backend is configured or EXPO_PUBLIC_MOCK=true.
- * In mock mode the app runs against src/mocks/mock-server (fixtures +
- * in-memory command lifecycle) so UI can be built/tested standalone.
+ * In mock mode the app runs against src/mocks/mock-server (in-memory command
+ * lifecycle) so UI can be built/tested standalone.
  */
 export function isMockMode(): boolean {
   if (process.env.EXPO_PUBLIC_MOCK === 'false') return false;

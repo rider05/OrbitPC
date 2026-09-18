@@ -6,6 +6,7 @@ import path from "node:path";
 // dataDir with 0600 + explicit warning. Helper process never calls this.
 
 export interface SecretBundle {
+  credentialId?: string;
   credential?: string;
   privateKeyPem?: string;
   publicKeyPem?: string;

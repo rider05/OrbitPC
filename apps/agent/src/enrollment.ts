@@ -60,7 +60,7 @@ export class EnrollmentManager {
       if (res.status === 200) {
         const data = (await res.json()) as { credentialId: string; credential: string; computerId: string };
         const cur = await this.store.load();
-        await this.store.save({ ...cur, credential: data.credential, computerId: data.computerId });
+        await this.store.save({ ...cur, credentialId: data.credentialId, credential: data.credential, computerId: data.computerId });
         return data;
       }
       await new Promise((r) => setTimeout(r, 3000));

@@ -15,28 +15,12 @@ function bootId() {
 
 const BOOT = bootId();
 
-export const mockComputers: Computer[] = [
-  {
-    id: '11111111-1111-4111-8111-111111111111',
-    displayName: 'Home-Desktop',
-    platform: 'windows',
-    agentVersion: '0.1.0-mock',
-    status: 'online',
-    lastSeenAt: nowIso(),
-    bootId: BOOT,
-    allowedActions: ['system.getStatus', 'system.lock', 'app.launch', 'system.sleep', 'system.restart', 'system.shutdown', 'notification.show', 'clipboard.setText'],
-  },
-  {
-    id: '22222222-2222-4222-8222-222222222222',
-    displayName: 'Work-Laptop (offline fixture)',
-    platform: 'windows',
-    agentVersion: '0.1.0-mock',
-    status: 'offline',
-    lastSeenAt: new Date(Date.now() - 42 * 60_000).toISOString(),
-    bootId: null,
-    allowedActions: ['system.getStatus', 'system.lock'],
-  },
-];
+/**
+ * No pre-seeded devices: the list starts empty and computers appear only via
+ * the pairing flow (confirmPairing below) — mirroring production, where a
+ * computer record is created on mobile approval and nowhere else.
+ */
+export const mockComputers: Computer[] = [];
 
 const commands = new Map<string, CommandRecord>();
 const byIdempotency = new Map<string, string>();
@@ -126,7 +110,8 @@ export const mockApi = {
     if (code === 'EXPIRED' || code.length < 4) throw mockError('COMMAND_EXPIRED', 'This pairing code expired. Generate a new one on your PC.');
     return {
       pairingId: code.length > 20 ? pairingIdOrCode.trim() : 'pairing-' + code,
-      computerName: 'DESKTOP-MOCK',
+      // Plausible name derived from the entered code — never a fixed device.
+      computerName: 'PC-' + code.replace(/[^A-Z0-9]/g, '').slice(-4).padStart(4, '0'),
       accountEmail: 'you@example.com',
       expiresAt: new Date(Date.now() + 4 * 60_000).toISOString(),
     };
@@ -135,9 +120,15 @@ export const mockApi = {
   async confirmPairing(pairingId: string): Promise<Computer> {
     await sleep(600);
     if (!pairingId) throw mockError('INVALID_ARGUMENT', 'Invalid pairing session.');
+    const suffix = pairingId
+      .replace(/^pairing-/i, '')
+      .replace(/[^A-Za-z0-9]/g, '')
+      .slice(-4)
+      .toUpperCase()
+      .padStart(4, '0');
     const created: Computer = {
       id: newId(),
-      displayName: 'DESKTOP-MOCK',
+      displayName: 'PC-' + suffix,
       platform: 'windows',
       agentVersion: '0.1.0-mock',
       status: 'online',
@@ -208,7 +199,7 @@ export const mockApi = {
           transition(
             { ...cur2, status: 'running' },
             'succeeded',
-            { resultRedacted: mockResult(name), errorCode: null },
+            { resultRedacted: mockResult(name, computer.displayName), errorCode: null },
             1400,
           );
         }
@@ -232,10 +223,10 @@ export const mockApi = {
   },
 };
 
-function mockResult(name: CommandName): Record<string, unknown> {
+function mockResult(name: CommandName, hostname: string): Record<string, unknown> {
   switch (name) {
     case 'system.getStatus':
-      return { hostname: 'DESKTOP-MOCK', uptimeSec: 12345, bootId: BOOT, batteryPct: 87, cpuPct: 12, memPct: 44 };
+      return { hostname, uptimeSec: 12345, bootId: BOOT, batteryPct: 87, cpuPct: 12, memPct: 44 };
     case 'system.lock':
       return { locked: true };
     case 'app.launch':
@@ -259,14 +250,3 @@ export function mockError(code: string, message: string): Error & { code: string
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
-
-/** UI-state fixtures so server/agent can verify copy without this branch. */
-export const fixtures = {
-  online: mockComputers[0],
-  offline: mockComputers[1],
-  uncertainCommand: {
-    id: 'cmd-uncertain-fixture',
-    name: 'system.restart',
-    status: 'timed_out',
-  } as const,
-};

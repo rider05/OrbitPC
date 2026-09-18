@@ -33,6 +33,26 @@ export class AuditWriter {
     await this.rotateIfNeeded();
   }
 
+  /** Last N audit events (best-effort parse; newest last). For the local panel. */
+  async recent(limit = 20): Promise<Record<string, unknown>[]> {
+    try {
+      const raw = await fs.readFile(this.file, "utf8");
+      return raw
+        .split("\n")
+        .filter((l) => l.trim())
+        .slice(-Math.max(1, limit))
+        .map((l) => {
+          try {
+            return JSON.parse(l) as Record<string, unknown>;
+          } catch {
+            return { raw: l.slice(0, 200) };
+          }
+        });
+    } catch {
+      return [];
+    }
+  }
+
   private async rotateIfNeeded(): Promise<void> {
     try {
       const st = await fs.stat(this.file);

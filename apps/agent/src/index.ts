@@ -18,18 +18,11 @@ async function main(): Promise<void> {
   const store = new FileSecureStore(config.dataDir);
   const audit = new AuditWriter(config.dataDir);
   const secrets = await store.load();
-  const computerId = config.computerId || secrets.computerId || randomUUID();
-
-  const dryRun = process.env.ORBITPC_DRY_RUN !== "0"; // default safe: never lock/sleep dev box
-  const dispatcher = new CommandDispatcher({
-    computerId,
-    adapterCtx: { allowedApps: config.allowedApps, dryRun },
-    clipboardOptIn: config.clipboardOptIn,
-    allowPowerOps: config.allowSleepRestartShutdown,
-    allowedApps: config.allowedApps,
-    dataDir: config.dataDir,
-    audit,
-  });
+  let computerId = config.computerId || secrets.computerId || randomUUID();
+  const httpBase = (process.env.ORBITPC_SERVER_HTTP || "http://localhost:3000").replace(/\/$/, "");
+  let effectiveCredentialId: string | null = config.credentialId || secrets.credentialId || null;
+  let openPanel = args.has("--panel");
+  const startedAt = new Date().toISOString();
 
   if (args.has("--revoke")) {
     await new EnrollmentManager("", store).revokeLocal();
@@ -89,41 +82,62 @@ async function main(): Promise<void> {
   }
 
   if (args.has("--pair")) {
-    const httpBase = (process.env.ORBITPC_SERVER_HTTP || "http://localhost:3000").replace(/\/$/, "");
-    const enrollment = new EnrollmentManager(httpBase, store);
-    let session;
     try {
-      session = await enrollment.startDeviceCode();
+      const done = await runPairingFlow(new EnrollmentManager(httpBase, store), audit);
+      effectiveCredentialId = done.credentialId;
+      computerId = done.computerId;
+      openPanel = true; // paired -> show the control panel, then keep running
     } catch (e) {
-      console.error(`[pair] server has no pairing endpoint yet (${(e as Error).message}). Try --pair-demo for the offline UI preview.`);
+      const msg = (e as Error).message;
+      if (msg.startsWith("device-code failed")) {
+        console.error(`[pair] server has no pairing endpoint yet (${msg}). Try --pair-demo for the offline UI preview.`);
+      } else {
+        console.error(`[pair] ${msg}`);
+      }
       process.exitCode = 1;
       return;
     }
-    const { servePairingPage } = await import("./pairing-ui.js");
-    const state: PairingUiState = { mode: "live", pairingId: session.pairingId, userCode: session.userCode, expiresAt: session.expiresAt, status: "waiting" };
-    const { server, url } = await servePairingPage(state);
-    console.log(`[pair] code: ${session.userCode}  opened: ${url}`);
-    console.log("[pair] Scan the QR (pairing ID only) with the signed-in mobile app and approve. Ctrl+C to abort.");
-    try {
-      if (!session.pollingSecret) {
-        console.error("[pair] server did not return a polling secret — cannot complete pairing.");
-        process.exitCode = 1;
-        return;
-      }
-      const done = await enrollment.pollUntilApproved(session.pairingId, session.pollingSecret);
-      state.status = "approved";
-      await audit.write({ actor: "agent", name: "pairing.approved", outcome: "succeeded", computerId: done.computerId });
-      console.log(`[pair] approved — computer ${done.computerId}. Credential stored, page shows success.`);
-      // Keep the success page up briefly, then close.
-      await new Promise((r) => setTimeout(r, 15000));
-    } catch (e) {
-      console.error(`[pair] ${(e as Error).message}`);
-      process.exitCode = 1;
-    } finally {
-      server.close();
-    }
-    return;
   }
+
+  // QR-first: a fresh `start` with no credential shows the pairing QR before
+  // doing anything else. After approval the agent continues to connect below
+  // and opens the control panel.
+  if (!effectiveCredentialId && !secrets.credential && !args.has("--mock-server")) {
+    console.log("[agent] no credential — showing pairing QR first. Approve on your phone to continue.");
+    try {
+      const done = await runPairingFlow(new EnrollmentManager(httpBase, store), audit);
+      effectiveCredentialId = done.credentialId;
+      computerId = done.computerId;
+      openPanel = true;
+    } catch (e) {
+      console.log(`[agent] pairing unavailable (${(e as Error).message}) — presence only (dry). Run with --pair once server is live, or --mock-server for local E2E.`);
+      console.log("[status]", JSON.stringify(await collectStatus()));
+      // Stay up until Ctrl+C. Note: a bare never-resolving promise does NOT
+      // keep Node's event loop alive on its own — the interval below does.
+      const heartbeat = setInterval(() => {
+        void collectStatus().then((s) => console.log(`[presence] heartbeat bootId=${s.bootId} uptimeSec=${s.uptimeSec}`));
+      }, 30_000);
+      const stop = () => {
+        clearInterval(heartbeat);
+        process.exit(0);
+      };
+      process.on("SIGINT", stop);
+      process.on("SIGTERM", stop);
+      await new Promise(() => {});
+      return;
+    }
+  }
+
+  const dryRun = process.env.ORBITPC_DRY_RUN !== "0"; // default safe: never lock/sleep dev box
+  const dispatcher = new CommandDispatcher({
+    computerId,
+    adapterCtx: { allowedApps: config.allowedApps, dryRun },
+    clipboardOptIn: config.clipboardOptIn,
+    allowPowerOps: config.allowSleepRestartShutdown,
+    allowedApps: config.allowedApps,
+    dataDir: config.dataDir,
+    audit,
+  });
 
   // IPC: service <-> helper round-trip (single-process dev: server + fake helper echo).
   const ipc = createIpcServer((msg, reply) => {
@@ -133,11 +147,22 @@ async function main(): Promise<void> {
   ipc.on("error", (e) => console.warn(`[ipc] ${(e as Error).message}`));
 
   let connection: ConnectionManager | null = null;
+  let connStatus = "not-started";
 
   // Nearby fan-out: LAN sockets register a per-command reply; cloud send stays.
   const lanReplies = new Map<string, Set<(msg: unknown) => void>>();
+  const { createCommandLog } = await import("./control-panel.js");
+  const commandLog = createCommandLog(10);
   const fanOutResult = (res: { commandId: string }) => {
     if (process.env.ORBITPC_VERBOSE) console.log(`[result] ${res.commandId} ${(res as { status?: string }).status}`);
+    const full = res as { status?: string; sequence?: number; error?: { code?: string } | null };
+    commandLog.push({
+      commandId: res.commandId,
+      status: full.status ?? "?",
+      sequence: full.sequence ?? 0,
+      at: new Date().toISOString(),
+      errorCode: full.error?.code ?? null,
+    });
     connection?.send({ ...res });
     const set = lanReplies.get(res.commandId);
     if (set) {
@@ -150,30 +175,58 @@ async function main(): Promise<void> {
   };
   dispatcher.onResult = fanOutResult as typeof dispatcher.onResult;
 
+  async function servePanel(): Promise<void> {
+    const { serveControlPanel } = await import("./control-panel.js");
+    const { url } = await serveControlPanel({
+      snapshot: async () => ({
+        computerId,
+        computerName: config.computerName,
+        startedAt,
+        connection: connStatus,
+        credentialPresent: !!(effectiveCredentialId || (await store.load()).credential),
+        dryRun,
+        allowedApps: Object.keys(config.allowedApps),
+        clipboardOptIn: config.clipboardOptIn,
+        allowPowerOps: config.allowSleepRestartShutdown,
+        recentCommands: commandLog.list(),
+        recentAudit: await audit.recent(20),
+      }),
+      onDisconnect: async () => {
+        await new EnrollmentManager("", store).revokeLocal();
+        effectiveCredentialId = null;
+        connStatus = "offline";
+        connection?.stop();
+        await audit.write({ actor: "owner", name: "pairing.revoked", outcome: "succeeded", computerId });
+        console.log("[panel] emergency disconnect: credential wiped, sockets closed.");
+      },
+    });
+    console.log(`[panel] control panel: ${url}`);
+  }
+
+  if (openPanel) {
+    await servePanel();
+  }
+
   if (args.has("--mock-server")) {
     await runMockServer(computerId, (raw) => void dispatcher.submit(raw), dispatcher);
     return;
   }
 
-  if (!config.credentialId && !secrets.credential) {
-    console.log("[agent] no credential — presence only (dry). Run with --pair once server is live, or --mock-server for local E2E.");
-    // Presence-only: still prove status collection + dispatcher locally.
-    console.log("[status]", JSON.stringify(await collectStatus()));
-    // Keep alive for tray/IPC demo.
-    await new Promise(() => {});
-    return;
-  }
-
+  // (Unpaired fresh starts pair via the QR-first flow above; --mock-server
+  // needs no credential.)
   connection = new ConnectionManager({
     serverUrl: config.serverUrl,
-    credentialId: config.credentialId,
+    credentialId: effectiveCredentialId,
     signNonce: () => null, // wired to Ed25519 key once enrolled
     onCommandRequest: (raw) => {
       const parsed = commandRequestSchema.safeParse(raw);
       if (!parsed.success) return; // fail closed
       void dispatcher.submit(parsed.data);
     },
-    onStatusChange: (s) => console.log(`[connection] ${s}`),
+    onStatusChange: (s) => {
+      connStatus = s;
+      console.log(`[connection] ${s}`);
+    },
   });
   connection.start();
 
@@ -238,6 +291,34 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+}
+
+/** Shared pairing flow: device-code -> QR page -> poll -> approved. Used by
+ *  --pair and by QR-first auto-pairing on fresh `start`. */
+async function runPairingFlow(
+  enrollment: EnrollmentManager,
+  audit: AuditWriter,
+): Promise<{ credentialId: string; credential: string; computerId: string }> {
+  const session = await enrollment.startDeviceCode(); // throws when server has no pairing endpoint
+  const { servePairingPage } = await import("./pairing-ui.js");
+  const state: PairingUiState = { mode: "live", pairingId: session.pairingId, userCode: session.userCode, expiresAt: session.expiresAt, status: "waiting" };
+  const { server, url } = await servePairingPage(state);
+  console.log(`[pair] code: ${session.userCode}  opened: ${url}`);
+  console.log("[pair] Scan the QR (pairing ID only) with the signed-in mobile app and approve. Ctrl+C to abort.");
+  try {
+    if (!session.pollingSecret) {
+      throw new Error("server did not return a polling secret — cannot complete pairing.");
+    }
+    const done = await enrollment.pollUntilApproved(session.pairingId, session.pollingSecret);
+    state.status = "approved";
+    await audit.write({ actor: "agent", name: "pairing.approved", outcome: "succeeded", computerId: done.computerId });
+    console.log(`[pair] approved — computer ${done.computerId}. Credential stored, page shows success.`);
+    // Keep the success page up briefly, then close.
+    await new Promise((r) => setTimeout(r, 15000));
+    return done;
+  } finally {
+    server.close();
+  }
 }
 
 /** Local E2E without backend: canned command.request -> dispatcher -> result log. */
