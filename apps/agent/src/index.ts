@@ -7,6 +7,7 @@ import { CommandDispatcher } from "./dispatcher.js";
 import { ConnectionManager } from "./connection.js";
 import { EnrollmentManager } from "./enrollment.js";
 import { AuditWriter } from "./audit.js";
+import type { PairingUiState } from "./pairing-ui.js";
 import { createIpcServer } from "./ipc.js";
 import { collectStatus } from "./status.js";
 
@@ -36,13 +37,49 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args.has("--pair-demo")) {
+    const { demoSession, servePairingPage } = await import("./pairing-ui.js");
+    const state = demoSession();
+    const { url } = await servePairingPage(state);
+    console.log(`[pair-demo] offline UI preview at ${url} (fake code, nothing to approve)`);
+    await new Promise(() => {});
+    return;
+  }
+
   if (args.has("--pair")) {
     const httpBase = (process.env.ORBITPC_SERVER_HTTP || "http://localhost:3000").replace(/\/$/, "");
     const enrollment = new EnrollmentManager(httpBase, store);
-    const session = await enrollment.startDeviceCode();
-    console.log(`[pair] code: ${session.userCode}  pairingId: ${session.pairingId}  expires: ${session.expiresAt}`);
-    console.log(`[pair] QR should encode pairingId only: ${session.pairingId}`);
-    console.log("[pair] Approve from the signed-in mobile app, then polling continues (Ctrl+C to abort).");
+    let session;
+    try {
+      session = await enrollment.startDeviceCode();
+    } catch (e) {
+      console.error(`[pair] server has no pairing endpoint yet (${(e as Error).message}). Try --pair-demo for the offline UI preview.`);
+      process.exitCode = 1;
+      return;
+    }
+    const { servePairingPage } = await import("./pairing-ui.js");
+    const state: PairingUiState = { mode: "live", pairingId: session.pairingId, userCode: session.userCode, expiresAt: session.expiresAt, status: "waiting" };
+    const { server, url } = await servePairingPage(state);
+    console.log(`[pair] code: ${session.userCode}  opened: ${url}`);
+    console.log("[pair] Scan the QR (pairing ID only) with the signed-in mobile app and approve. Ctrl+C to abort.");
+    try {
+      if (!session.pollingSecret) {
+        console.error("[pair] server did not return a polling secret — cannot complete pairing.");
+        process.exitCode = 1;
+        return;
+      }
+      const done = await enrollment.pollUntilApproved(session.pairingId, session.pollingSecret);
+      state.status = "approved";
+      await audit.write({ actor: "agent", name: "pairing.approved", outcome: "succeeded", computerId: done.computerId });
+      console.log(`[pair] approved — computer ${done.computerId}. Credential stored, page shows success.`);
+      // Keep the success page up briefly, then close.
+      await new Promise((r) => setTimeout(r, 15000));
+    } catch (e) {
+      console.error(`[pair] ${(e as Error).message}`);
+      process.exitCode = 1;
+    } finally {
+      server.close();
+    }
     return;
   }
 

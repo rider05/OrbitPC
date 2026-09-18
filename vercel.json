@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "pnpm install --prefer-offline",
+  "buildCommand": "pnpm --filter @orbit/protocol build && pnpm --filter @orbit/server build",
+  "functions": {
+    "api/index.ts": {
+      "runtime": "nodejs22.x"
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }]
+}

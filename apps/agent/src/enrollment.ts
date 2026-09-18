@@ -10,6 +10,8 @@ export interface PairingSession {
   pairingId: string;
   userCode: string;
   expiresAt: string;
+  /** One-time polling secret — memory only, never logged, never in QR. */
+  pollingSecret?: string;
 }
 
 export class EnrollmentManager {
@@ -43,14 +45,9 @@ export class EnrollmentManager {
       body: JSON.stringify({ publicKey: keys.publicKeyPem, displayName: process.env.COMPUTERNAME || "Windows-PC" }),
     });
     if (!res.ok) throw new Error(`device-code failed: ${res.status}`);
-    const data = (await res.json()) as PairingSession & { pollingSecret?: string };
+    const data = (await res.json()) as PairingSession;
     const cur = await this.store.load();
-    await this.store.save({ ...cur, computerId: (data as { pairingId?: string }).pairingId });
-    if (data.pollingSecret) {
-      // stash polling secret alongside (memory-only in prod; dev file ok, redacted from logs)
-      const loaded = await this.store.load();
-      await this.store.save({ ...loaded, credential: loaded.credential, privateKeyPem: loaded.privateKeyPem });
-    }
+    await this.store.save({ ...cur, computerId: data.pairingId });
     return data;
   }
 
