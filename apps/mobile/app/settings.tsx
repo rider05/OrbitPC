@@ -16,6 +16,7 @@ export default function Settings() {
   const [computers, setComputers] = useState<Computer[]>([]);
   const [rename, setRename] = useState<Record<string, string>>({});
   const [lanHost, setLanHost] = useState<Record<string, string>>({});
+  const [lanToken, setLanToken] = useState<Record<string, string>>({});
   const [nearbyMsg, setNearbyMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -109,9 +110,21 @@ export default function Settings() {
                 return;
               }
               await NearbyManager.rememberLanHost(c.id, host);
+              const token = (lanToken[c.id] ?? '').trim();
+              if (token) await NearbyManager.rememberLanToken(c.id, token);
               await NearbyManager.autoConnect([c.id]);
               setNearbyMsg('Nearby scan done for ' + c.displayName + ' — open its dashboard to see the route badge.');
             }}
+          />
+          <Muted>LAN bearer (only if the PC enforces auth: run agent with --show-lan-token).</Muted>
+          <TextInput
+            style={styles.input}
+            placeholder="LAN token (optional)"
+            placeholderTextColor={colors.muted}
+            value={lanToken[c.id] ?? ''}
+            onChangeText={(v) => setLanToken((r) => ({ ...r, [c.id]: v }))}
+            autoCapitalize="none"
+            secureTextEntry
           />
         </Card>
       ))}

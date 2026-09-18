@@ -37,6 +37,48 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args.has("--nearby-status")) {
+    const { lanAddresses } = await import("./nearby-lan.js");
+    console.log(JSON.stringify({
+      lanEnabled: config.nearbyLanEnabled,
+      port: config.nearbyLanPort,
+      host: config.nearbyLanHost,
+      addresses: lanAddresses(),
+      tlsConfigured: !!(config.nearbyTlsCert && config.nearbyTlsKey),
+      requireAuth: config.nearbyRequireAuth,
+      mdns: config.nearbyMdns,
+      bleEnabled: config.nearbyBleEnabled,
+      computerId,
+    }, null, 2));
+    return;
+  }
+
+  if (args.has("--show-lan-token")) {
+    const { ensureLanToken } = await import("./nearby-auth.js");
+    const { token, created } = await ensureLanToken(store);
+    console.log(`[lan-token] ${created ? "created" : "existing"} — enter this in the phone app Settings > Nearby direct (per PC).`);
+    console.log(token);
+    return;
+  }
+
+  if (args.has("--firewall-add")) {
+    if (process.platform !== "win32") {
+      console.error("[firewall] Windows only (netsh). Open TCP port manually on this OS.");
+      process.exitCode = 1;
+      return;
+    }
+    const { execFile } = await import("node:child_process");
+    const port = String(config.nearbyLanPort || 11430);
+    await new Promise<void>((resolve, reject) => {
+      execFile("netsh", ["advfirewall", "firewall", "add", "rule", "name=OrbitPC Nearby", "dir=in", "action=allow", "protocol=TCP", `localport=${port}`], { shell: false }, (err) => (err ? reject(err) : resolve()));
+    }).catch((e) => {
+      console.error(`[firewall] failed (run as Administrator): ${(e as Error).message}`);
+      process.exitCode = 1;
+    });
+    if (process.exitCode !== 1) console.log(`[firewall] inbound TCP ${port} allowed (LAN only — do not port-forward on your router).`);
+    return;
+  }
+
   if (args.has("--pair-demo")) {
     const { demoSession, servePairingPage } = await import("./pairing-ui.js");
     const state = demoSession();
@@ -137,15 +179,26 @@ async function main(): Promise<void> {
 
   // Nearby direct connect (opt-in, starts on boot alongside cloud).
   // LAN-first phone path + BLE beacon hint. Cloud relay keeps running.
+  let stopNearby: (() => void) | null = null;
   if (config.nearbyLanEnabled || config.nearbyBleEnabled) {
     const { startNearbyLan } = await import("./nearby-lan.js");
     if (config.nearbyLanEnabled) {
       try {
-        await startNearbyLan({
+        const { ensureLanToken, verifyLanToken } = await import("./nearby-auth.js");
+        const { token: lanToken, created } = await ensureLanToken(store);
+        if (created) console.log("[nearby-lan] LAN bearer created — run with --show-lan-token to enter it in the phone app.");
+        const handle = await startNearbyLan({
           port: config.nearbyLanPort || NEARBY_LAN_DEFAULT_PORT,
+          host: config.nearbyLanHost,
           computerId,
           computerName: config.computerName,
           getBootId,
+          tlsCertPath: config.nearbyTlsCert,
+          tlsKeyPath: config.nearbyTlsKey,
+          requireAuth: config.nearbyRequireAuth,
+          verifyToken: (presented) => verifyLanToken(presented, lanToken),
+          enableMdns: config.nearbyMdns,
+          onAudit: (event) => { void audit.write(event); },
           submit: (raw, reply) => {
             const parsed = commandRequestSchema.safeParse(raw);
             if (!parsed.success) return; // fail closed
@@ -155,6 +208,7 @@ async function main(): Promise<void> {
             void dispatcher.submit(parsed.data);
           },
         });
+        stopNearby = handle.stop;
       } catch (e) {
         console.warn(`[nearby-lan] failed to start: ${(e as Error).message}`);
       }
@@ -162,7 +216,11 @@ async function main(): Promise<void> {
     if (config.nearbyBleEnabled) {
       try {
         const { startBleAdvertise } = await import("./nearby-ble.js");
-        await startBleAdvertise({ computerId, lanPort: config.nearbyLanPort || NEARBY_LAN_DEFAULT_PORT, bootId: await getBootId() });
+        const adv = await startBleAdvertise({ computerId, lanPort: config.nearbyLanPort || NEARBY_LAN_DEFAULT_PORT, bootId: await getBootId() });
+        if (adv) {
+          const prev = stopNearby;
+          stopNearby = () => { try { prev?.(); } catch { /* ignore */ } adv.stop(); };
+        }
       } catch (e) {
         console.warn(`[nearby-ble] failed to start: ${(e as Error).message}`);
       }
@@ -173,6 +231,7 @@ async function main(): Promise<void> {
   console.log("[agent] tray: online state, last command, pairing, policies, emergency --revoke available");
 
   const shutdown = () => {
+    try { stopNearby?.(); } catch { /* ignore */ }
     connection?.stop();
     ipc.close();
     process.exit(0);

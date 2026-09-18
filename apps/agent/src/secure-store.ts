@@ -10,6 +10,12 @@ export interface SecretBundle {
   privateKeyPem?: string;
   publicKeyPem?: string;
   computerId?: string;
+  /**
+   * Nearby-LAN bearer token (pairing-derived secret for direct Wi-Fi commands).
+   * Never logged, never sent to the cloud relay — presented by the phone only
+   * over the LAN transport (WS query param), verified in constant time.
+   */
+  lanToken?: string;
 }
 
 export class FileSecureStore {

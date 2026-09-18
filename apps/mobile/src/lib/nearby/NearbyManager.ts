@@ -43,6 +43,7 @@ interface LanHealth {
 }
 
 const HOSTS_KEY = 'orbitpc.lanHosts.v1';
+const TOKENS_KEY = 'orbitpc.lanTokens.v1';
 
 const noBleScanner: BleScanner = { scan: async () => [] };
 
@@ -73,13 +74,24 @@ async function saveKnownHosts(map: Record<string, string[]>): Promise<void> {
   }
 }
 
+async function loadLanTokens(): Promise<Record<string, string>> {
+  try {
+    const raw = await SecureStore.getItemAsync(TOKENS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+
 const TERMINAL = new Set(['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'timed_out']);
 
-function sendViaLanWs(host: string, port: number, envelope: Record<string, unknown>): Promise<Record<string, unknown>> {
+function sendViaLanWs(host: string, port: number, envelope: Record<string, unknown>, token?: string): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let ws: WebSocket;
     try {
-      ws = new WebSocket(`ws://${host}:${port}/nearby`);
+      // LAN bearer travels outside the frozen envelope (query param).
+      const url = token ? `ws://${host}:${port}/nearby?token=${encodeURIComponent(token)}` : `ws://${host}:${port}/nearby`;
+      ws = new WebSocket(url);
     } catch (e) {
       reject(e);
       return;
@@ -148,6 +160,20 @@ class NearbyManagerImpl {
     const list = [host, ...(map[computerId] ?? []).filter((h) => h !== host)].slice(0, 5);
     map[computerId] = list;
     await saveKnownHosts(map);
+  }
+
+  /** Remember the LAN bearer for a PC (Settings field; secure storage only). */
+  async rememberLanToken(computerId: string, token: string): Promise<void> {
+    try {
+      const map = await loadLanTokens();
+      if (token) map[computerId] = token;
+      else delete map[computerId];
+      await SecureStore.setItemAsync(TOKENS_KEY, JSON.stringify(map));
+    } catch { /* best effort */ }
+  }
+
+  async lanTokenFor(computerId: string): Promise<string | undefined> {
+    return (await loadLanTokens())[computerId];
   }
 
   /**
@@ -228,7 +254,8 @@ class NearbyManagerImpl {
     // 1) LAN direct (WebSocket to the PC agent's opt-in listener).
     if (nearby?.route === 'lan' && nearby.host) {
       try {
-        const res = (await sendViaLanWs(nearby.host, nearby.port, envelope)) as {
+        const token = await this.lanTokenFor(computerId);
+        const res = (await sendViaLanWs(nearby.host, nearby.port, envelope, token)) as {
           status: string; result?: Record<string, unknown> | null; error?: { code: string } | null;
         };
         this.lastRoute.set(computerId, 'lan');

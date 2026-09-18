@@ -13,6 +13,15 @@ export interface AgentConfig {
   /** Opt-in LAN listener for nearby direct connect (default OFF — opens a LAN port). */
   nearbyLanEnabled: boolean;
   nearbyLanPort: number;
+  /** Bind address for the LAN listener (default 0.0.0.0 = all LAN interfaces). */
+  nearbyLanHost: string;
+  /** PEM paths for wss:// (both set => TLS). Absent => ws:// + warning. */
+  nearbyTlsCert: string | null;
+  nearbyTlsKey: string | null;
+  /** Fail closed without the LAN bearer (default OFF for first-run compat). */
+  nearbyRequireAuth: boolean;
+  /** Publish `_orbitpc._tcp` mDNS record (default ON, best-effort). */
+  nearbyMdns: boolean;
   /** Opt-in BLE beacon for nearby discovery + data fallback (default OFF). */
   nearbyBleEnabled: boolean;
 }
@@ -38,6 +47,11 @@ export function loadConfig(): AgentConfig {
     allowSleepRestartShutdown: process.env.ORBITPC_ALLOW_POWER !== "0",
     nearbyLanEnabled: process.env.ORBITPC_NEARBY_LAN === "1",
     nearbyLanPort: Number(process.env.ORBITPC_NEARBY_PORT || 11430),
+    nearbyLanHost: process.env.ORBITPC_NEARBY_HOST || "0.0.0.0",
+    nearbyTlsCert: process.env.ORBITPC_NEARBY_TLS_CERT ?? null,
+    nearbyTlsKey: process.env.ORBITPC_NEARBY_TLS_KEY ?? null,
+    nearbyRequireAuth: process.env.ORBITPC_NEARBY_REQUIRE_AUTH === "1",
+    nearbyMdns: process.env.ORBITPC_NEARBY_MDNS !== "0",
     nearbyBleEnabled: process.env.ORBITPC_NEARBY_BLE === "1",
   };
 }
