@@ -84,16 +84,16 @@ Message paths:
 
 ### Pairing flow
 
-Pairing must establish a durable relationship between one account and one agent installation without asking the user to type a secret into a remote app.
+Pairing must establish a durable relationship between one account and one agent installation without typing the account password into the PC agent or typing a secret into a remote app. Use a device-authorization flow (RFC 8628 style): the PC shows a code, the already-signed-in mobile app approves it.
 
-1. User signs in to the PC agent locally and chooses **Pair this PC**.
-2. The agent requests a short-lived, single-use pairing session from the server using the user’s local authenticated setup flow. Display a QR code containing only a random pairing ID and one-time pairing secret (or a deep link), valid for 5 minutes.
-3. The signed-in mobile app scans the QR code and displays the PC name, account, and expiry for user confirmation.
-4. On confirmation, the server creates a `computer` record and issues the agent a random device credential plus a credential ID. The agent stores the secret with Windows DPAPI/credential manager, never in a plain config file.
-5. The agent generates an Ed25519 key pair locally. Send its public key during enrollment and keep the private key protected locally. Bind future connection proofs to that key in addition to the stored device credential.
-6. Mobile app receives only the computer’s opaque ID and display metadata. It never receives the agent credential.
+1. User chooses **Pair this PC** in the local agent UI. No email/password entry on the PC.
+2. The agent calls unauthenticated `POST /v1/pairing-sessions/device-code` and receives a short-lived, single-use `pairingId`, user code (e.g. `WXYZ-1234`), QR/deep-link encoding only the `pairingId`, and 5-minute expiry. The agent polls `GET /v1/pairing-sessions/:id/status` with its one-time polling secret.
+3. The signed-in mobile app scans the QR (or enters the user code) and displays PC name, account email, and expiry for explicit user confirmation, plus recent-auth proof if required.
+4. On confirmation, the server creates a `computer` record bound to `owner_user_id` and issues the agent a random device credential plus a credential ID on the next poll response. The agent stores the secret with Windows DPAPI/credential manager, never in a plain config file.
+5. The agent generates an Ed25519 key pair locally before polling completes. Send its public key during enrollment and keep the private key protected locally. Bind future connection proofs to that key in addition to the stored device credential.
+6. Mobile app receives only the computer's opaque ID and display metadata. It never receives the agent credential.
 
-Require local PC approval for a new account pairing. Let the owner revoke a computer, mobile session, or agent credential from either the app or a local agent UI. Revocation closes active sockets and invalidates pending commands.
+Require local PC initiation plus mobile-account approval for every new pairing (both sides confirm). Let the owner revoke a computer, mobile session, or agent credential from either the app or a local agent UI. Revocation closes active sockets within 60 seconds and invalidates pending commands.
 
 ## 6. Secure remote communication and WebSocket strategy
 
@@ -101,14 +101,14 @@ Require local PC approval for a new account pairing. Let the owner revoke a comp
 
 - Serve REST over HTTPS and sockets over WSS on one public domain, e.g. `api.example.com` and `/socket`.
 - Terminate TLS at a reverse proxy (Caddy, Nginx, or a managed load balancer) using automatic certificate renewal. Redirect HTTP to HTTPS; enable HSTS after testing.
-- Require TLS 1.2+ (prefer TLS 1.3); validate hostnames and normal certificate chains in both clients.
+- Require TLS 1.2+ (prefer TLS 1.3); validate hostnames and normal certificate chains in both clients. For MVP use standard CA validation; optionally pin the leaf/SPKI after first stable deployment with a documented rotation/break-glass procedure. Do not ship a “skip certificate verification” flag.
 - Use an outbound agent connection with exponential reconnect. Do not require port forwarding.
 - Send application ping/pong every 20–30 seconds and treat a peer as offline after a conservative timeout (e.g. 75 seconds).
 
 ### Socket authentication
 
-- Mobile socket handshake: access token in the authorization header or Socket.IO auth payload. Validate issuer, audience, expiry, and session revocation.
-- Agent socket handshake: credential ID + nonce-based proof signed by the agent Ed25519 key, plus a short-lived server-issued agent access token. Rotate device credentials periodically and upon revocation.
+- Mobile socket handshake: access token in the authorization header or Socket.IO auth payload. Validate issuer, audience, expiry, and session revocation. Client must re-authenticate the live socket on every access-token refresh via `auth.refresh` event; server disconnects the socket within 60 seconds of session revocation or refresh-token rotation failure.
+- Agent socket handshake: credential ID + nonce-based proof signed by the agent Ed25519 key, plus a short-lived server-issued agent access token. Rotate device credentials periodically and upon revocation. Agent must renew its access token before expiry without dropping the queue; server rejects commands on expired agent tokens with `AUTH_REQUIRED`.
 - Associate each accepted socket server-side with exactly one `userSession` or `computer`. Never accept account/computer IDs supplied in later messages as identity.
 - Place sockets in private rooms such as `computer:{id}` and `user:{id}` only after authorization.
 
@@ -145,7 +145,7 @@ Use versioned, typed JSON envelopes over WSS. Zod schemas should compile for bac
 }
 ```
 
-The server adds a command authorization record/signature (or issues the envelope only after authorization). The agent accepts a command only if `computerId` matches itself, the timestamp is fresh, the command is not already finished, and the server identity/session is valid.
+The server adds a command authorization record/signature (or issues the envelope only after authorization). The agent accepts a command only if `computerId` matches itself, the timestamp is fresh, the command is not already finished, and the server identity/session is valid. Server time is authoritative: allow ±30s clock skew on `requestedAt`, enforce `expiresAt` server-side (default 60s), and reject expired or future-dated commands with `COMMAND_EXPIRED`.
 
 ### Result envelope
 
@@ -172,25 +172,26 @@ The catalog is the product’s safety boundary. Model each command explicitly, w
 
 | Command | MVP | Guardrails |
 | --- | --- | --- |
-| `system.getStatus` | Yes | Read-only, rate-limit |
-| `system.lock` | Yes | Immediate; audit |
-| `system.sleep` | Yes | App confirmation; agent can reject when policy forbids |
-| `system.restart` / `system.shutdown` | Yes | Explicit confirmation + recent auth; optional 30-second local abort window |
-| `app.launch` | Yes | Only named apps/approved paths configured locally; no arbitrary arguments initially |
-| `notification.show` | Yes | Length/type limits; no scripts/URLs executed automatically |
-| `clipboard.setText` | Yes | Text only, byte limit, opt-in local policy |
+| `system.getStatus` | Yes (M2a) | Read-only, 1 req/5s per computer, cached 5s |
+| `system.lock` | Yes (M2a) | Immediate; audit; 1 req/10s |
+| `system.sleep` | Yes (M2b) | App confirmation; agent can reject when policy forbids; max 3/hr |
+| `system.restart` / `system.shutdown` | Yes (M2b) | Explicit confirmation + recent auth (10-min window); 30-second local abort toast where OS supports it; max 2/hr; never queued offline — reject with `COMPUTER_OFFLINE` |
+| `app.launch` | Yes (M2a, single approved app) | Only named apps/approved paths configured locally; no arbitrary arguments initially; max 10/hr |
+| `notification.show` | Yes (M2b) | Length/type limits (≤200 chars); max 10/hr; no scripts/URLs executed automatically |
+| `clipboard.setText` | Yes (M2b, opt-in) | Text only, ≤4KB, opt-in local policy; max 10/hr |
 | `file.*` | Later | Folder allowlists, scan/quota/expiry |
 | `screen.*`, `input.*` | Later | Separate high-risk consent/session model |
 | `shell.execute` | Never in consumer MVP | Do not expose arbitrary shell execution |
 
-Store the local allowlist in an agent-owned configuration UI. The app may request an approved application by immutable ID, not a raw path. Resolve and validate the path locally; never concatenate a shell command string. Invoke programs with argument arrays and safe OS APIs.
+Store the local allowlist in an agent-owned configuration UI. The app may request an approved application by immutable ID, not a raw path. Resolve and validate the path locally; never concatenate a shell command string. Invoke programs with argument arrays and safe OS APIs. The agent's local policy is authoritative at execution time; the server's `GET/PATCH /computers/:id/policies` view is a cache for UI display only and must never override a local deny.
 
 ## 9. PC agent design
 
 ### Installation and runtime
 
-- Start as a signed/installer-managed Windows desktop app with a tray UI plus a background service where practical. The service maintains connectivity; the tray UI shows status, last command, pairing, policies, and an emergency “disconnect/revoke” action.
-- Use least privilege. Most commands run as the currently logged-in user; a separate elevated helper is introduced only for narrowly defined operations and communicates through a local authenticated IPC channel.
+- Start as a signed/installer-managed Windows app with two cooperating processes due to Session 0 isolation: (1) a background service (`agent-service`, SYSTEM or dedicated service account) that owns WSS connectivity, enrollment, and queueing; (2) a per-user session helper (`agent-ui`, tray app running as the logged-in user) that owns actual execution of `lock`, `app.launch`, `notification.show`, `clipboard.setText`, and status collection. The tray UI also shows status, last command, pairing, policies, and an emergency “disconnect/revoke” action.
+- Service-to-session communication uses an authenticated local IPC channel only (named pipe with SDACL restricted to SYSTEM + logged-in user SID, per-message command ID + nonce, no remote network listener). The service never executes user-session APIs directly; the helper never holds the long-lived device credential — the service signs/forwards validated commands over IPC.
+- Use least privilege. Most commands run as the currently logged-in user via the helper; a separate elevated helper is introduced only for narrowly defined operations and communicates through a local authenticated IPC channel.
 - Do not run the whole agent as Administrator. Avoid UAC bypasses and commands that weaken Windows security.
 - Store device credential and private key using DPAPI/Windows Credential Manager, scoped to the appropriate account/service identity.
 - Auto-update only with signed releases, HTTPS downloads, version pinning/rollback policy, and clear update audit events. Defer auto-update until after MVP if signing infrastructure is not ready; do not silently execute unsigned updates.
@@ -212,7 +213,7 @@ Store the local allowlist in an agent-owned configuration UI. The app may reques
 - Acknowledge only after validation; report `running` before actions that can take time.
 - Persist recently completed command IDs and outcomes so retransmissions are idempotent across reconnects/restarts.
 - Recheck local policy immediately before execution, even if server previously allowed it.
-- For sleep/restart/shutdown, flush result/audit messages before triggering the OS action; send a best-effort final message and allow status reconciliation after reconnect.
+- For sleep/restart/shutdown, flush result/audit messages before triggering the OS action; send a best-effort final message and allow status reconciliation after reconnect. Treat post-dispatch state as `uncertain` until the agent reconnects and reports a new boot ID / boot time: the mobile app must show `Action uncertain — verifying` and never auto-retry destructive commands. Server marks `timed_out` after expiry, not `succeeded`.
 
 ## 10. Mobile app design
 
@@ -232,7 +233,7 @@ Store the local allowlist in an agent-owned configuration UI. The app may reques
 - Cache only minimal non-sensitive metadata. Keep tokens in secure storage.
 - Generate idempotency keys before submit and retain pending-command state locally until resolution.
 - Do not optimistically claim an OS action succeeded: show `Sending`, then authoritative command state.
-- Use push notifications later for completion/offline alerts; never put sensitive command details in notification text.
+- Use push notifications later for completion/offline alerts; never put sensitive command details in notification text. Send opaque payloads only (e.g. “PC update available — open app”), fetch details over authenticated HTTPS. Applies to Expo push as well since it transits Expo/Google/Apple servers.
 
 ## 11. Express backend design
 
@@ -420,7 +421,7 @@ Before release, conduct a focused security review of pairing, session refresh, a
 - Default command expiry is 60 seconds. Do not queue destructive actions for a PC that is currently offline.
 - Read-only, safe requests can optionally be queued for a very short period only if the user explicitly sees that behavior; defer this until after MVP.
 - Agent reconnect uses exponential backoff with jitter (e.g. 1 s → 2 → 4 → … capped at 60 s) and resets after stable connectivity.
-- On reconnect, agent sends current status, active/recent command state, and a resume cursor. Server reconciles missed results without rerunning completed commands.
+- On reconnect, agent sends current status including boot ID / boot time (e.g. Windows `GetTickCount64` + system boot time), active/recent command state, and a resume cursor. Server reconciles missed results without rerunning completed commands. Mobile resolves `uncertain` destructive commands by comparing pre- and post-command boot IDs.
 - Persist client command state in the backend; mobile and agent local caches are accelerators, not authority.
 - Define server-side job cleanup for expired pairing sessions, commands, token records, and temporary transfer objects.
 
@@ -449,7 +450,7 @@ remote-pc-control/
   plan.md
 ```
 
-Use `pnpm` workspaces or Turborepo. Keep protocol compatibility explicit: changes to `packages/protocol` require a protocol-version decision, tests, and agent/mobile/server compatibility notes.
+Use `pnpm` workspaces or Turborepo. Keep protocol compatibility explicit: changes to `packages/protocol` require a protocol-version decision (bump `v`, keep `v-1` parser for one release), compatibility tests (old agent + new server must fail closed with `INVALID_ARGUMENT`/`COMMAND_NOT_ALLOWED`, never execute), and agent/mobile/server compatibility notes.
 
 ## 22. Milestones
 
@@ -463,18 +464,18 @@ Use `pnpm` workspaces or Turborepo. Keep protocol compatibility explicit: change
 
 ### Milestone 1 — secure pairing and presence (1–2 weeks)
 
-- Implement user sessions, agent enrollment key pair/credential storage, pairing QR, computer records, agent WSS handshake, heartbeat, and online/last-seen display.
-- Implement computer/session revocation and audit events.
+- Implement user sessions, device-code pairing flow (agent shows code/QR, mobile approves), agent enrollment key pair/credential storage, computer records, agent WSS handshake, heartbeat with boot ID, and online/last-seen display.
+- Implement computer/session revocation (socket close ≤60s) and audit events.
 
-**Exit:** a user can pair one Windows PC and see trustworthy online/offline state from the app.
+**Exit:** a user can pair one Windows PC without typing a password on the PC and see trustworthy online/offline state from the app.
 
-### Milestone 2 — command-control MVP (2–3 weeks)
+### Milestone 2 — command-control MVP (2–3 weeks, split)
 
-- Implement persisted command lifecycle, idempotency, socket relay, reconnection reconciliation, policies, and first allowlisted actions.
-- Build agent local configuration/tray status and mobile dashboard/confirmations/history.
-- Add rate limits, input validation, audit redaction, and failure UX.
+- M2a (safe core): persisted command lifecycle, idempotency, socket relay + re-auth, reconnection reconciliation, policies, and only `system.getStatus`, `system.lock`, one approved `app.launch`.
+- M2b (destructive): add `system.sleep` / `system.restart` / `system.shutdown` with confirmation + recent-auth, `notification.show`, opt-in `clipboard.setText`, per-command rate limits, input validation, audit redaction, and `uncertain`-state failure UX.
+- Build agent service + user-session helper IPC/tray status and mobile dashboard/confirmations/history.
 
-**Exit:** lock/status/approved app launch/restart actions work securely across separate networks, with correct result history.
+**Exit:** lock/status/approved app launch work securely across separate networks in M2a; restart/shutdown work with correct `uncertain` reconciliation and history only in M2b.
 
 ### Milestone 3 — hardening and deploy (1–2 weeks)
 
