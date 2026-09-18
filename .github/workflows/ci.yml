@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile=false
+      - run: pnpm --filter ./packages/protocol build
+      - run: pnpm --filter ./packages/protocol test
+      - run: pnpm --filter ./packages/protocol-alias build
+      - run: pnpm --filter ./apps/server typecheck
+      - run: pnpm --filter ./apps/server test
+      - run: pnpm --filter ./apps/server build
+      - run: pnpm --dir ./apps/server exec prisma validate
+        env:
+          DATABASE_URL: postgresql://orbit:orbit_dev_pw@localhost:5432/orbit?schema=public

@@ -1,0 +1,179 @@
+// Prisma schema — M0 foundation.
+// Source: plan.md §12 + docs/architecture.md §Data.
+// Only the server track migrates the DB (plans/server-plan.md §2).
+// Secrets policy: store HASHES only (password_hash, refresh_token_hash,
+// credential_hash, secret_hash). Never raw passwords/tokens/credentials/keys.
+// Audit payloads are redacted (args_redacted / result_redacted / metadata_redacted).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  // TEXT + app-level lowercase normalization (M1 auth). Avoids the
+  // citext extension so the first migration applies on stock Postgres.
+  email         String    @unique
+  passwordHash  String    @map("password_hash")
+  verifiedAt    DateTime? @map("verified_at") @db.Timestamptz
+  mfaSecret     String?   @map("mfa_secret")
+  mfaEnabled    Boolean   @default(false) @map("mfa_enabled")
+  status        String    @default("active")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  sessions  UserSession[]
+  computers Computer[]
+
+  @@map("users")
+}
+
+model UserSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash")
+  deviceLabel      String?   @map("device_label")
+  deviceMeta       Json?     @map("device_meta")
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz
+  lastSeenAt       DateTime? @map("last_seen_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  commands Command[]
+
+  @@index([userId, revokedAt])
+  @@map("user_sessions")
+}
+
+model Computer {
+  id           String    @id @default(uuid()) @db.Uuid
+  ownerUserId  String    @map("owner_user_id") @db.Uuid
+  displayName  String    @map("display_name")
+  platform     String    @default("windows")
+  agentVersion String?   @map("agent_version")
+  publicKey    String?   @map("public_key")
+  bootId       String?   @map("boot_id")
+  status       String    @default("offline")
+  lastSeenAt   DateTime? @map("last_seen_at") @db.Timestamptz
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  owner       User                  @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  credentials ComputerCredential[]
+  policies    CommandPolicy[]
+  commands    Command[]
+  auditEvents AuditEvent[]
+
+  @@index([ownerUserId, revokedAt])
+  @@map("computers")
+}
+
+model ComputerCredential {
+  id             String    @id @default(uuid()) @db.Uuid
+  computerId     String    @map("computer_id") @db.Uuid
+  credentialHash String    @map("credential_hash")
+  issuedAt       DateTime  @default(now()) @map("issued_at") @db.Timestamptz
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz
+  rotatedAt      DateTime? @map("rotated_at") @db.Timestamptz
+  revokedAt      DateTime? @map("revoked_at") @db.Timestamptz
+
+  computer Computer @relation(fields: [computerId], references: [id], onDelete: Cascade)
+
+  @@index([computerId, revokedAt])
+  @@map("computer_credentials")
+}
+
+model PairingSession {
+  id             String    @id @default(uuid()) @db.Uuid
+  ownerUserId    String?   @map("owner_user_id") @db.Uuid
+  userCodeHash   String?   @map("user_code_hash")
+  secretHash     String    @map("secret_hash")
+  computerMeta   Json?     @map("requested_computer_metadata")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz
+  usedAt         DateTime? @map("used_at") @db.Timestamptz
+  pollingSecretH String?   @map("polling_secret_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([expiresAt])
+  @@map("pairing_sessions")
+}
+
+model CommandPolicy {
+  id          String   @id @default(uuid()) @db.Uuid
+  computerId  String   @map("computer_id") @db.Uuid
+  commandName String   @map("command_name")
+  enabled     Boolean  @default(true)
+  config      Json?
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  computer Computer @relation(fields: [computerId], references: [id], onDelete: Cascade)
+
+  @@unique([computerId, commandName])
+  @@map("command_policies")
+}
+
+model Command {
+  id                 String    @id @default(uuid()) @db.Uuid
+  idempotencyKey     String    @map("idempotency_key") @db.Uuid
+  computerId         String    @map("computer_id") @db.Uuid
+  requesterSessionId String    @map("requester_session_id") @db.Uuid
+  name               String
+  argsRedacted       Json?     @map("args_redacted")
+  status             String    @default("queued")
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz
+  resultRedacted     Json?     @map("result_redacted")
+  errorCode          String?   @map("error_code")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  computer         Computer       @relation(fields: [computerId], references: [id], onDelete: Restrict)
+  requesterSession UserSession    @relation(fields: [requesterSessionId], references: [id], onDelete: Restrict)
+  events           CommandEvent[]
+
+  @@unique([requesterSessionId, idempotencyKey])
+  @@index([computerId, createdAt(sort: Desc)])
+  @@map("commands")
+}
+
+model CommandEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  commandId      String   @map("command_id") @db.Uuid
+  sequence       Int
+  eventType      String   @map("event_type")
+  payloadRedact  Json?    @map("payload_redacted")
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  command Command @relation(fields: [commandId], references: [id], onDelete: Cascade)
+
+  @@unique([commandId, sequence])
+  @@map("command_events")
+}
+
+model AuditEvent {
+  id               String   @id @default(uuid()) @db.Uuid
+  actorType        String   @map("actor_type")
+  actorId          String?  @map("actor_id") @db.Uuid
+  computerId       String?  @map("computer_id") @db.Uuid
+  action           String
+  outcome          String
+  ipContext        String?  @map("ip_context")
+  deviceContext    Json?    @map("device_context")
+  metadataRedacted Json?    @map("metadata_redacted")
+  occurredAt       DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  computer Computer? @relation(fields: [computerId], references: [id], onDelete: SetNull)
+
+  @@index([computerId, occurredAt(sort: Desc)])
+  @@index([actorId, occurredAt(sort: Desc)])
+  @@map("audit_events")
+}

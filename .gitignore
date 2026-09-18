@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+! .env.example
+apps/server/.env
+.DS_Store
+Thumbs.db
+*.log
+prisma/migrations/dev.db*

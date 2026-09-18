@@ -1,0 +1,22 @@
+# Caddy reverse proxy — TLS termination for prod/personal beta.
+# Source: plan.md §6, §24. Expose only 443 publicly; HTTP redirects to HTTPS.
+# Replace api.example.com with the real public domain. Dev uses compose directly.
+{
+  auto_https standard
+}
+
+api.example.com {
+  reverse_proxy 127.0.0.1:3000
+
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "no-referrer"
+  }
+
+  log {
+    output stdout
+    format json
+  }
+}

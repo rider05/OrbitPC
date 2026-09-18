@@ -1,0 +1,14 @@
+{
+  "name": "@orbit/config",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./tsconfig.base.json",
+  "files": ["tsconfig.base.json"],
+  "scripts": {
+    "lint": "echo \"@orbit/config: nothing to lint\"",
+    "build": "echo \"@orbit/config: nothing to build\"",
+    "test": "echo \"@orbit/config: nothing to test\"",
+    "typecheck": "echo \"@orbit/config: nothing to typecheck\""
+  }
+}

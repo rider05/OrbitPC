@@ -1,0 +1,6 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  # Mobile is an Expo app managed with npm (has its own package-lock);
+  # keep it out of the pnpm workspace until the mobile track aligns tooling.
+  - "!apps/mobile"

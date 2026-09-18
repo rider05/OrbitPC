@@ -1,0 +1,20 @@
+{
+  "name": "remote-pc-control",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev:server": "pnpm --filter ./apps/server dev",
+    "dev": "pnpm --filter ./apps/server dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "db:generate": "pnpm --filter ./apps/server db:generate",
+    "db:migrate": "pnpm --filter ./apps/server db:migrate",
+    "db:deploy": "pnpm --filter ./apps/server db:deploy"
+  }
+}

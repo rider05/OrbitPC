@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: orbit-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: orbit
+      POSTGRES_PASSWORD: orbit_dev_pw
+      POSTGRES_DB: orbit
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbit -d orbit"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: orbit-redis
+    restart: unless-stopped
+    # Optional in MVP M0–M2a single-instance; required when scaling sockets.
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Local server run (optional — agent/mobile run natively per docs/runbook.md).
+  # Build: docker compose -f infra/docker/compose.yml up --build server
+  server:
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    container_name: orbit-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://orbit:orbit_dev_pw@postgres:5432/orbit?schema=public
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8081
+    ports:
+      - "3000:3000"
+    profiles: ["server"]
+
+volumes:
+  pgdata:
+  redisdata:
