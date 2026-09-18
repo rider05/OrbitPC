@@ -57,7 +57,7 @@ call pnpm -r lint
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/9] test (all workspaces: protocol 11, server 4, agent 9)...
+echo [5/9] test (all workspaces: protocol 14, server 8, agent 20)...
 call pnpm -r test
 if errorlevel 1 goto :fail
 
@@ -111,7 +111,7 @@ if "%CHECKS_ONLY%"=="1" (
 )
 
 echo.
-echo [9/9] smoke tests: server health + agent mock-server...
+echo [9/9] smoke tests: server health + agent mock-server + nearby LAN...
 echo   -- server: start on :3000, probe /health and /v1/health --
 powershell -NoProfile -Command "$job = $null; try { $job = Start-Job -ScriptBlock { Set-Location -LiteralPath '%~dp0apps\server'; $env:PORT='3000'; node dist/server.js }; Start-Sleep -Seconds 4; $h1 = Invoke-RestMethod -Uri 'http://localhost:3000/health' -TimeoutSec 5; if (-not $h1.ok) { throw 'bad /health payload' }; $v1 = Invoke-RestMethod -Uri 'http://localhost:3000/v1/health' -TimeoutSec 5; if ($v1.service -ne 'orbit-server') { throw 'bad /v1/health payload' }; Write-Output ('server OK: ' + ($h1 | ConvertTo-Json -Compress) + ' service=' + $v1.service) } catch { Write-Output ('SERVER_SMOKE_FAIL: ' + $_.Exception.Message); if ($job) { Receive-Job $job 2>&1 | Select-Object -Last 10 }; exit 1 } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }"
 if errorlevel 1 goto :fail
@@ -120,12 +120,21 @@ echo   -- agent: --mock-server boots, runs M2a sequence (getStatus/lock/launch) 
 powershell -NoProfile -Command "$job = $null; try { $job = Start-Job -ScriptBlock { Set-Location -LiteralPath '%~dp0apps\agent'; $env:ORBITPC_MOCK_PORT='4455'; node dist/index.js --mock-server }; Start-Sleep -Seconds 6; $o = Receive-Job $job 2>&1 | Out-String; Write-Output $o; if ($o -notmatch 'mock-server') { throw 'no mock-server banner' }; if ($o -notmatch 'succeeded') { throw 'no succeeded results' } } catch { Write-Output ('AGENT_SMOKE_FAIL: ' + $_.Exception.Message); exit 1 } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }"
 if errorlevel 1 goto :fail
 
+echo   -- agent nearby: LAN listener boots on :11439, /nearby/health answers --
+powershell -NoProfile -Command "$job = $null; try { $job = Start-Job -ScriptBlock { Set-Location -LiteralPath '%~dp0apps\agent'; $env:ORBITPC_CREDENTIAL_ID='smoke-test'; $env:ORBITPC_COMPUTER_ID='33333333-3333-4333-8333-333333333333'; $env:ORBITPC_NEARBY_LAN='1'; $env:ORBITPC_NEARBY_PORT='11439'; $env:ORBITPC_NEARBY_MDNS='0'; node dist/index.js }; Start-Sleep -Seconds 7; $h = Invoke-RestMethod -Uri 'http://localhost:11439/nearby/health' -TimeoutSec 5; if (-not $h.ok) { throw 'bad nearby health payload' }; if ($h.computerId -ne '33333333-3333-4333-8333-333333333333') { throw 'computerId mismatch' }; Write-Output ('nearby LAN OK: tls=' + $h.tls + ' auth=' + $h.auth) } catch { Write-Output ('NEARBY_SMOKE_FAIL: ' + $_.Exception.Message); if ($job) { Receive-Job $job 2>&1 | Select-Object -Last 10 }; exit 1 } finally { if ($job) { Stop-Job $job; Remove-Job $job -Force } }"
+if errorlevel 1 goto :fail
+
+echo   -- agent nearby: --nearby-status reports LAN config --
+powershell -NoProfile -Command "try { $env:ORBITPC_NEARBY_LAN='1'; $env:ORBITPC_NEARBY_PORT='11439'; Set-Location -LiteralPath '%~dp0apps\agent'; $o = node dist/index.js --nearby-status | Out-String; Write-Output $o; if ($o -notmatch '11439') { throw 'status missing port' }; if ($o -notmatch 'lanEnabled') { throw 'status missing lanEnabled' } } catch { Write-Output ('NEARBY_STATUS_FAIL: ' + $_.Exception.Message); exit 1 }"
+if errorlevel 1 goto :fail
+
 :pass
 echo.
 echo ============================================
 echo  ALL GREEN.
 echo  Next: pnpm dev:server  +  pnpm --filter @orbit/agent dev:mock
 echo  DB:   docker compose -f infra/docker/compose.yml up postgres redis
+echo  Nearby: set ORBITPC_NEARBY_LAN=1, then agent --nearby-status / --show-lan-token / --firewall-add
 echo ============================================
 endlocal
 exit /b 0
