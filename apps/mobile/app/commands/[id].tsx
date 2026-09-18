@@ -5,7 +5,7 @@ import { CommandTimeline } from '../../src/components/CommandTimeline';
 import { ActionButton, Card, Muted, StatusBadge } from '../../src/components/ui';
 import { api } from '../../src/lib/api';
 import { friendlyError } from '../../src/lib/errors';
-import { useCommandUpdates } from '../../src/lib/socket';
+import { useCommandUpdates, useCommandPolling } from '../../src/lib/socket';
 import type { CommandRecord } from '../../src/protocol/types';
 import { isSafeToRetry } from '../../src/protocol/types';
 import { newId } from '../../src/lib/ids';
@@ -21,6 +21,10 @@ export default function CommandDetail() {
   }, [id]);
 
   useCommandUpdates((cmd) => {
+    if (cmd.id === id) setCommand(cmd);
+  });
+
+  useCommandPolling(typeof id === 'string' ? id : undefined, true, (cmd) => {
     if (cmd.id === id) setCommand(cmd);
   });
 

@@ -9,7 +9,7 @@ import { friendlyError } from '../../src/lib/errors';
 import { newId } from '../../src/lib/ids';
 import { NearbyManager } from '../../src/lib/nearby/NearbyManager';
 import { routeLabel, useNearbyRoute } from '../../src/lib/nearby/useNearby';
-import { useCommandUpdates } from '../../src/lib/socket';
+import { useCommandUpdates, useCommandPolling } from '../../src/lib/socket';
 import type { CommandName, CommandRecord, Computer } from '../../src/protocol/types';
 import { colors, radius, spacing } from '../../src/theme/tokens';
 
@@ -56,13 +56,23 @@ export default function ComputerDashboard() {
 
   useCommandUpdates((cmd) => {
     if (cmd.computerId !== id) return;
+    setPending((p) => (p && p.id === cmd.id ? cmd : p));    setHistory((h) => {
+      const i = h.findIndex((x) => x.id === cmd.id);
+      if (i >= 0) return h.map((x) => (x.id === cmd.id ? cmd : x));
+      return [cmd, ...h];
+    });
+    // Resolve "uncertain" by boot-ID comparison once fresh status arrives.
+    if (cmd.status === 'timed_out') load();
+  });
+
+  // Real-mode live fallback: poll the in-flight command until it settles.
+  useCommandPolling(typeof id === 'string' ? pending?.id : undefined, !!pending && pending.computerId === id, (cmd) => {
     setPending((p) => (p && p.id === cmd.id ? cmd : p));
     setHistory((h) => {
       const i = h.findIndex((x) => x.id === cmd.id);
       if (i >= 0) return h.map((x) => (x.id === cmd.id ? cmd : x));
       return [cmd, ...h];
     });
-    // Resolve "uncertain" by boot-ID comparison once fresh status arrives.
     if (cmd.status === 'timed_out') load();
   });
 
@@ -176,7 +186,7 @@ export default function ComputerDashboard() {
       <Text style={styles.section}>Send to PC (M2b)</Text>
       <Text style={styles.label}>Notification (≤200 chars)</Text>
       <TextInput style={styles.input} value={note} onChangeText={setNote} placeholder="Hello from your phone" placeholderTextColor={colors.muted} maxLength={200} />
-      <ActionButton title="Show notification" onPress={() => submit('notification.show', { text: note })} disabled={note.length === 0} loading={sending} />
+      <ActionButton title="Show notification" onPress={() => submit('notification.show', { title: 'OrbitPC', body: note })} disabled={note.length === 0} loading={sending} />
       <Text style={styles.label}>Clipboard text (opt-in on PC, ≤4KB)</Text>
       <TextInput style={styles.input} value={clip} onChangeText={setClip} placeholder="Text to place on PC clipboard" placeholderTextColor={colors.muted} maxLength={4096} />
       <ActionButton title="Set PC clipboard" onPress={() => submit('clipboard.setText', { text: clip })} disabled={clip.length === 0} loading={sending} />

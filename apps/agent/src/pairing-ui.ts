@@ -113,13 +113,21 @@ export function openBrowser(url: string): void {
     return;
   }
   const plat = process.platform;
+  const done = (err: Error | null) => {
+    if (err) console.log(`[pair] could not auto-open a browser (${err.message}) — open this URL manually: ${url}`);
+  };
   try {
-    if (plat === "win32") execFile("cmd", ["/c", "start", "", url]);
-    else if (plat === "darwin") execFile("open", [url]);
-    else execFile("xdg-open", [url]);
-  } catch {
-    console.log(`[pair] open this URL in a browser: ${url}`);
+    if (plat === "win32") execFile("cmd", ["/c", "start", "", url], done);
+    else if (plat === "darwin") execFile("open", [url], done);
+    else execFile("xdg-open", [url], done);
+  } catch (e) {
+    console.log(`[pair] could not auto-open a browser (${(e as Error).message}) — open this URL manually: ${url}`);
   }
+}
+
+/** ASCII QR for the terminal — visible even when no browser opens. */
+export async function qrTerminal(pairingId: string): Promise<string> {
+  return QRCode.toString(qrPayload({ pairingId }), { type: "terminal", small: true });
 }
 
 /** Demo session for --pair-demo (offline UI review; clearly fake, unusable as credential). */

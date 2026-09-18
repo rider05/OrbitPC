@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
+import { z } from 'zod';
 import { ApiError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 
@@ -24,6 +25,13 @@ export function errorHandler(
   if (err instanceof ApiError) {
     res.status(err.status).json({
       error: { code: err.code, message: err.message, requestId: req.requestId },
+    });
+    return;
+  }
+  // Schema validation failures are client errors, never 500s.
+  if (err instanceof z.ZodError) {
+    res.status(400).json({
+      error: { code: 'INVALID_ARGUMENT', message: 'Invalid request.', requestId: req.requestId },
     });
     return;
   }

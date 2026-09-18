@@ -8,6 +8,10 @@ import { logger } from './lib/logger.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { requestId } from './middleware/requestId.js';
 import { healthRouter } from './routes/health.js';
+import { authRouter } from './routes/auth.js';
+import { pairingRouter } from './routes/pairing.js';
+import { computersRouter } from './routes/computers.js';
+import { commandsRouter } from './routes/commands.js';
 
 // helmet@8 ships dual CJS/ESM type definitions (index.d.cts + index.d.mts)
 // with no "types" condition in "exports". Some resolvers (observed on the
@@ -99,6 +103,13 @@ export function createApp(): express.Express {
     res.status(200).json({ ok: true });
   });
   app.use('/v1', healthRouter);
+  app.use('/v1/auth', authRouter);
+  app.use('/v1/pairing-sessions', pairingRouter);
+  // computersRouter serves /computers/* (mobile) and agent :id/heartbeat + :id/pending.
+  app.use('/v1/computers', computersRouter);
+  // commandsRouter serves nested /computers/:id/commands + /commands/:id*.
+  // Mounted at /v1 so both shapes resolve.
+  app.use('/v1', commandsRouter);
 
   app.use(notFound);
   app.use(errorHandler);

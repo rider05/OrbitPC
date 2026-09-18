@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   let computerId = config.computerId || secrets.computerId || randomUUID();
   const httpBase = (process.env.ORBITPC_SERVER_HTTP || "http://localhost:3000").replace(/\/$/, "");
   let effectiveCredentialId: string | null = config.credentialId || secrets.credentialId || null;
+  let liveCredential: string | null = secrets.credential ?? null;
   let openPanel = args.has("--panel");
   const startedAt = new Date().toISOString();
 
@@ -73,10 +74,12 @@ async function main(): Promise<void> {
   }
 
   if (args.has("--pair-demo")) {
-    const { demoSession, servePairingPage } = await import("./pairing-ui.js");
+    const { demoSession, servePairingPage, qrTerminal } = await import("./pairing-ui.js");
     const state = demoSession();
     const { url } = await servePairingPage(state);
     console.log(`[pair-demo] offline UI preview at ${url} (fake code, nothing to approve)`);
+    console.log(await qrTerminal(state.pairingId));
+    console.log(`[pair-demo] If no browser opened, paste this URL manually: ${url}`);
     await new Promise(() => {});
     return;
   }
@@ -152,7 +155,9 @@ async function main(): Promise<void> {
   // Nearby fan-out: LAN sockets register a per-command reply; cloud send stays.
   const lanReplies = new Map<string, Set<(msg: unknown) => void>>();
   const { createCommandLog } = await import("./control-panel.js");
+  const { PollTransport } = await import("./poll-transport.js");
   const commandLog = createCommandLog(10);
+  let poll: import("./poll-transport.js").PollTransport | null = null;
   const fanOutResult = (res: { commandId: string }) => {
     if (process.env.ORBITPC_VERBOSE) console.log(`[result] ${res.commandId} ${(res as { status?: string }).status}`);
     const full = res as { status?: string; sequence?: number; error?: { code?: string } | null };
@@ -164,6 +169,7 @@ async function main(): Promise<void> {
       errorCode: full.error?.code ?? null,
     });
     connection?.send({ ...res });
+    if (poll) void poll.report(res as import("@orbit/protocol").CommandResult);
     const set = lanReplies.get(res.commandId);
     if (set) {
       for (const reply of [...set]) {
@@ -194,8 +200,10 @@ async function main(): Promise<void> {
       onDisconnect: async () => {
         await new EnrollmentManager("", store).revokeLocal();
         effectiveCredentialId = null;
+        liveCredential = null;
         connStatus = "offline";
         connection?.stop();
+        poll?.stop();
         await audit.write({ actor: "owner", name: "pairing.revoked", outcome: "succeeded", computerId });
         console.log("[panel] emergency disconnect: credential wiped, sockets closed.");
       },
@@ -229,6 +237,26 @@ async function main(): Promise<void> {
     },
   });
   connection.start();
+
+  // HTTPS poll relay (serverless-compatible): heartbeat + pending inbox +
+  // result posts. Runs whenever this agent holds a credential.
+  // Refresh from store: a pairing completed above in this same process.
+  liveCredential = (await store.load()).credential ?? liveCredential;
+  if (effectiveCredentialId || liveCredential) {
+    poll = new PollTransport({
+      httpBase,
+      computerId,
+      agentVersion: "0.1.0",
+      getCredential: () => liveCredential,
+      onCommandRequest: (raw) => {
+        const parsed = commandRequestSchema.safeParse(raw);
+        if (!parsed.success) return; // fail closed
+        void dispatcher.submit(parsed.data);
+      },
+      onOnlineChange: (online) => console.log(`[poll] ${online ? "online" : "offline"}`),
+    });
+    poll.start();
+  }
 
   // Nearby direct connect (opt-in, starts on boot alongside cloud).
   // LAN-first phone path + BLE beacon hint. Cloud relay keeps running.
@@ -285,6 +313,7 @@ async function main(): Promise<void> {
 
   const shutdown = () => {
     try { stopNearby?.(); } catch { /* ignore */ }
+    try { poll?.stop(); } catch { /* ignore */ }
     connection?.stop();
     ipc.close();
     process.exit(0);
@@ -300,10 +329,12 @@ async function runPairingFlow(
   audit: AuditWriter,
 ): Promise<{ credentialId: string; credential: string; computerId: string }> {
   const session = await enrollment.startDeviceCode(); // throws when server has no pairing endpoint
-  const { servePairingPage } = await import("./pairing-ui.js");
+  const { servePairingPage, qrTerminal } = await import("./pairing-ui.js");
   const state: PairingUiState = { mode: "live", pairingId: session.pairingId, userCode: session.userCode, expiresAt: session.expiresAt, status: "waiting" };
   const { server, url } = await servePairingPage(state);
   console.log(`[pair] code: ${session.userCode}  opened: ${url}`);
+  console.log(await qrTerminal(session.pairingId));
+  console.log(`[pair] If no browser opened, paste this URL manually: ${url}`);
   console.log("[pair] Scan the QR (pairing ID only) with the signed-in mobile app and approve. Ctrl+C to abort.");
   try {
     if (!session.pollingSecret) {
@@ -330,7 +361,15 @@ async function runMockServer(
   const port = Number(process.env.ORBITPC_MOCK_PORT || 4455);
   const wss = new WebSocketServer({ port });
   console.log(`[mock-server] ws://127.0.0.1:${port} computerId=${computerId}`);
-  dispatcher.onResult = (res) => console.log(`[mock-result] ${res.status} #${res.sequence} ${JSON.stringify(res.result ?? res.error)}`);
+  const prevOnResult = dispatcher.onResult;
+  dispatcher.onResult = (res) => {
+    try {
+      prevOnResult(res); // keep fan-out (panel log, LAN replies) alive in mock mode
+    } catch {
+      // ignore
+    }
+    console.log(`[mock-result] ${res.status} #${res.sequence} ${JSON.stringify(res.result ?? res.error)}`);
+  };
 
   wss.on("connection", (ws) => {
     for (const cmd of buildSequence()) {

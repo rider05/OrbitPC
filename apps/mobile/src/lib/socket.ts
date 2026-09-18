@@ -4,6 +4,45 @@ import { isMockMode, getApiUrl } from './config';
 import { loadSession } from './secure-store';
 import type { CommandRecord } from '../protocol/types';
 
+const TERMINAL = new Set(['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'timed_out']);
+
+/**
+ * HTTPS fallback: poll one command until it settles. Used in real mode
+ * alongside (or when) the socket hint is unavailable — the poll relay is
+ * authoritative, sockets are only hints (plan.md §6).
+ */
+export function useCommandPolling(
+  commandId: string | undefined,
+  enabled: boolean,
+  onUpdate: (cmd: CommandRecord) => void,
+) {
+  useEffect(() => {
+    if (!commandId || !enabled || isMockMode()) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        const { api } = await import('./api');
+        const cmd = await api.getCommand(commandId);
+        if (stopped) return;
+        onUpdate(cmd);
+        if (!TERMINAL.has(cmd.status)) {
+          timer = setTimeout(poll, 3000);
+        }
+      } catch {
+        if (!stopped) timer = setTimeout(poll, 5000);
+      }
+    };
+    timer = setTimeout(poll, 2000);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commandId, enabled]);
+}
+
 /**
  * Live command-result subscription.
  * - Mock mode: in-memory listener (same sequence-ordered semantics).

@@ -37,6 +37,7 @@ model UserSession {
   id               String    @id @default(uuid()) @db.Uuid
   userId           String    @map("user_id") @db.Uuid
   refreshTokenHash String    @map("refresh_token_hash")
+  lastReauthAt     DateTime? @map("last_reauth_at") @db.Timestamptz
   deviceLabel      String?   @map("device_label")
   deviceMeta       Json?     @map("device_meta")
   expiresAt        DateTime  @map("expires_at") @db.Timestamptz
@@ -128,6 +129,7 @@ model Command {
   computerId         String    @map("computer_id") @db.Uuid
   requesterSessionId String    @map("requester_session_id") @db.Uuid
   name               String
+  args               Json?
   argsRedacted       Json?     @map("args_redacted")
   status             String    @default("queued")
   expiresAt          DateTime  @map("expires_at") @db.Timestamptz

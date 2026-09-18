@@ -51,21 +51,34 @@ export class EnrollmentManager {
     return data;
   }
 
+  /** Poll status until approved, then fetch the (rotating) device credential. */
   async pollUntilApproved(pairingId: string, pollingSecret: string, timeoutMs = 5 * 60 * 1000): Promise<{ credentialId: string; credential: string; computerId: string }> {
     const start = Date.now();
+    let computerId: string | null = null;
     while (Date.now() - start < timeoutMs) {
       const res = await fetch(`${this.serverHttpBase}/v1/pairing-sessions/${pairingId}/status`, {
         headers: { authorization: `Bearer ${pollingSecret}` },
       });
       if (res.status === 200) {
-        const data = (await res.json()) as { credentialId: string; credential: string; computerId: string };
-        const cur = await this.store.load();
-        await this.store.save({ ...cur, credentialId: data.credentialId, credential: data.credential, computerId: data.computerId });
-        return data;
+        const data = (await res.json()) as { status?: string; computerId?: string };
+        if (data.computerId) {
+          computerId = data.computerId;
+          break;
+        }
       }
       await new Promise((r) => setTimeout(r, 3000));
     }
-    throw new Error("Pairing timed out");
+    if (!computerId) throw new Error("Pairing timed out");
+    const cred = await fetch(`${this.serverHttpBase}/v1/pairing-sessions/${pairingId}/credential`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ pollingSecret }),
+    });
+    if (!cred.ok) throw new Error(`credential issue failed: ${cred.status}`);
+    const data = (await cred.json()) as { credentialId: string; credential: string; computerId: string };
+    const cur = await this.store.load();
+    await this.store.save({ ...cur, credentialId: data.credentialId, credential: data.credential, computerId: data.computerId });
+    return data;
   }
 
   async revokeLocal(): Promise<void> {
