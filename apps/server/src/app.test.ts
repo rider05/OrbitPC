@@ -38,4 +38,39 @@ describe('server M0', () => {
       expect(res.body.error.code).toBe('INVALID_ARGUMENT');
     }
   });
+
+  describe('Vercel rewrite normalization', () => {
+    it('restores route from __url query parameter', async () => {
+      const app = createApp();
+      const res = await request(app).get('/api/index.js?__url=/v1/health');
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.service).toBe('orbit-server');
+    });
+
+    it('restores root route from __url=/', async () => {
+      const app = createApp();
+      const res = await request(app).get('/api/index.js?__url=/');
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.service).toBe('orbit-server');
+      expect(res.body.version).toBe('0.1.0');
+    });
+
+    it('preserves other query parameters while extracting __url', async () => {
+      const app = createApp();
+      const res = await request(app).get('/api/index.js?__url=/health&check=1');
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+    });
+
+    it('falls back to root endpoint on plain /api/index.js invocation', async () => {
+      const app = createApp();
+      const res = await request(app).get('/api/index.js');
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.service).toBe('orbit-server');
+    });
+  });
 });
+

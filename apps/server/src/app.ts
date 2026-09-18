@@ -25,6 +25,46 @@ export function createApp(): express.Express {
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
 
+  // Vercel serverless rewrite normalization: restore original path if rewritten to entrypoint
+  app.use((req, _res, next) => {
+    try {
+      const parsed = new URL(req.url, 'http://localhost');
+      let targetUrl = parsed.searchParams.get('__url');
+      if (targetUrl) {
+        if (!targetUrl.startsWith('/')) {
+          targetUrl = `/${targetUrl}`;
+        }
+        targetUrl = targetUrl.replace(/^\/+/, '/');
+        parsed.searchParams.delete('__url');
+        const qs = parsed.searchParams.toString();
+        const restored = qs ? `${targetUrl}?${qs}` : targetUrl;
+        req.url = restored;
+        (req as unknown as { originalUrl: string }).originalUrl = restored;
+      } else if (req.url === '/api/index.js' || req.url.startsWith('/api/index.js?')) {
+        const headerOriginal =
+          req.headers['x-now-route-matches'] ||
+          req.headers['x-matched-path'] ||
+          req.headers['x-forwarded-uri'] ||
+          req.headers['x-original-url'];
+        if (
+          typeof headerOriginal === 'string' &&
+          headerOriginal.startsWith('/') &&
+          headerOriginal !== '/api/index.js'
+        ) {
+          req.url = headerOriginal;
+          (req as unknown as { originalUrl: string }).originalUrl = headerOriginal;
+        } else {
+          // Fallback if Vercel internal rewrite passed entrypoint without query or header
+          req.url = '/';
+          (req as unknown as { originalUrl: string }).originalUrl = '/';
+        }
+      }
+    } catch {
+      // Keep req.url as-is if URL parse fails
+    }
+    next();
+  });
+
   app.use(requestId);
   app.use(
     pinoHttp({
@@ -44,17 +84,6 @@ export function createApp(): express.Express {
   );
   // Body limits: fail closed before protocol validation (64KB command cap enforced in @orbit/protocol).
   app.use(express.json({ limit: '256kb', strict: true }));
-
-  // Vercel serverless rewrite normalization: restore original path if rewritten to entrypoint
-  app.use((req, _res, next) => {
-    if (req.url === '/api/index.js' || req.url.startsWith('/api/index.js?')) {
-      const original = req.headers['x-matched-path'];
-      if (typeof original === 'string' && original.startsWith('/')) {
-        req.url = original;
-      }
-    }
-    next();
-  });
 
   // Root endpoint for status / platform liveness
   app.get('/', (_req, res) => {
