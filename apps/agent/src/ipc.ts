@@ -1,4 +1,5 @@
 import net from "node:net";
+import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 
 // Local IPC: named pipe (Windows) / unix socket (dev).
@@ -19,7 +20,7 @@ export function createIpcServer(onMessage: (msg: IpcMessage, reply: (m: IpcMessa
   // Clean stale unix socket in dev.
   if (process.platform !== "win32") {
     try {
-      require("fs").rmSync(PIPE_NAME, { force: true });
+      fs.rmSync(PIPE_NAME, { force: true });
     } catch {
       // ignore
     }

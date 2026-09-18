@@ -94,6 +94,11 @@ describe('protocol v1', () => {
         args: { text: 'x'.repeat(MAX_COMMAND_MESSAGE_BYTES) },
       }),
     ).toBe(true);
+    expect(isMessageTooLarge('short string')).toBe(false);
+    expect(isMessageTooLarge('x'.repeat(MAX_COMMAND_MESSAGE_BYTES + 1))).toBe(true);
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(isMessageTooLarge(circular)).toBe(true);
   });
 
   it('requires monotonic sequence on results', () => {

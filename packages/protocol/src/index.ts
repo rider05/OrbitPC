@@ -325,7 +325,14 @@ export type CommandResult = z.infer<typeof commandResultSchema>;
 
 /** Byte size of the JSON encoding; used to enforce the 64KB cap. */
 export function messageByteSize(message: unknown): number {
-  return Buffer.byteLength(JSON.stringify(message), 'utf8');
+  try {
+    if (typeof message === 'string') return Buffer.byteLength(message, 'utf8');
+    const json = JSON.stringify(message);
+    if (json === undefined) return 0;
+    return Buffer.byteLength(json, 'utf8');
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 export function isMessageTooLarge(message: unknown): boolean {

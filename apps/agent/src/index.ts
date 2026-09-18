@@ -1,4 +1,4 @@
-﻿import { WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
 import { randomUUID } from "node:crypto";
 import { commandRequestSchema } from "@orbit/protocol";
 import { loadConfig } from "./config.js";
@@ -8,7 +8,7 @@ import { ConnectionManager } from "./connection.js";
 import { EnrollmentManager } from "./enrollment.js";
 import { AuditWriter } from "./audit.js";
 import type { PairingUiState } from "./pairing-ui.js";
-import { createIpcServer } from "./ipc.js";
+import { createIpcServer, PIPE_NAME } from "./ipc.js";
 import { collectStatus } from "./status.js";
 
 const args = new Set(process.argv.slice(2));
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const ipc = createIpcServer((msg, reply) => {
     reply({ commandId: msg.commandId, nonce: msg.nonce, kind: `${msg.kind}.ack` });
   });
-  ipc.listen(computeIpcPath(), () => console.log(`[ipc] listening`));
+  ipc.listen(PIPE_NAME, () => console.log(`[ipc] listening`));
   ipc.on("error", (e) => console.warn(`[ipc] ${(e as Error).message}`));
 
   dispatcher.onResult = (res) => {
@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   }
 
   if (!config.credentialId && !secrets.credential) {
-    console.log("[agent] no credential â€” presence only (dry). Run with --pair once server is live, or --mock-server for local E2E.");
+    console.log("[agent] no credential — presence only (dry). Run with --pair once server is live, or --mock-server for local E2E.");
     // Presence-only: still prove status collection + dispatcher locally.
     console.log("[status]", JSON.stringify(await collectStatus()));
     // Keep alive for tray/IPC demo.
@@ -135,10 +135,6 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-}
-
-function computeIpcPath(): string {
-  return process.platform === "win32" ? `\\\\.\\pipe\\OrbitPC-agent` : "/tmp/orbitpc-agent.sock";
 }
 
 /** Local E2E without backend: canned command.request -> dispatcher -> result log. */
