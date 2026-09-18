@@ -7,6 +7,8 @@ import { ActionButton, Card, Muted, StatusBadge } from '../../src/components/ui'
 import { api } from '../../src/lib/api';
 import { friendlyError } from '../../src/lib/errors';
 import { newId } from '../../src/lib/ids';
+import { NearbyManager } from '../../src/lib/nearby/NearbyManager';
+import { routeLabel, useNearbyRoute } from '../../src/lib/nearby/useNearby';
 import { useCommandUpdates } from '../../src/lib/socket';
 import type { CommandName, CommandRecord, Computer } from '../../src/protocol/types';
 import { colors, radius, spacing } from '../../src/theme/tokens';
@@ -29,6 +31,8 @@ export default function ComputerDashboard() {
   const [reauthPw, setReauthPw] = useState('');
   const [needsReauth, setNeedsReauth] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [lastRoute, setLastRoute] = useState<string | null>(null);
+  const nearbyRoute = useNearbyRoute(typeof id === 'string' ? id : undefined);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -37,6 +41,8 @@ export default function ComputerDashboard() {
       setComputer(c);
       setHistory(h);
       setUpdatedAt(new Date());
+      // Auto-connect on every dashboard open: nearby LAN/BLE first, cloud fallback.
+      NearbyManager.autoConnect([id as string]).catch(() => {});
     } catch (e) {
       const err = e as Error & { code?: string };
       Alert.alert('Failed to load', friendlyError(err.code, err.message));
@@ -72,8 +78,12 @@ export default function ComputerDashboard() {
     }
     setSending(true);
     try {
-      // Client-generated commandId + idempotencyKey; retained until resolution.
-      const record = await api.submitCommand(id, name, args, newId(), newId());
+      // LAN-first, BLE-data fallback, cloud fallback. Client-generated
+      // commandId + idempotencyKey on every route; retained until resolution.
+      const { record, route } = await NearbyManager.submitBestEffort(id, name, args, () =>
+        api.submitCommand(id, name, args, newId(), newId()),
+      );
+      setLastRoute(route);
       setPending(record);
       setHistory((h) => [record, ...h.filter((x) => x.id !== record.id)]);
       setConfirming(null);
@@ -123,6 +133,7 @@ export default function ComputerDashboard() {
             </Muted>
             {computer.bootId ? <Muted>boot {computer.bootId.slice(0, 16)}…</Muted> : null}
             {updatedAt ? <Muted>Last updated {updatedAt.toLocaleTimeString()} (cached otherwise)</Muted> : null}
+            <Muted>Route: {routeLabel(nearbyRoute)}{lastRoute ? ` • last sent via ${lastRoute}` : ''}</Muted>
           </View>
           <StatusBadge status={computer.status} />
         </View>

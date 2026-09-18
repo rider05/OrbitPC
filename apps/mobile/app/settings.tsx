@@ -6,6 +6,7 @@ import { ActionButton, Card, Muted } from '../src/components/ui';
 import { api } from '../src/lib/api';
 import { isMockMode } from '../src/lib/config';
 import { friendlyError } from '../src/lib/errors';
+import { NearbyManager } from '../src/lib/nearby/NearbyManager';
 import type { Computer } from '../src/protocol/types';
 import { colors, radius, spacing } from '../src/theme/tokens';
 
@@ -14,6 +15,8 @@ export default function Settings() {
   const router = useRouter();
   const [computers, setComputers] = useState<Computer[]>([]);
   const [rename, setRename] = useState<Record<string, string>>({});
+  const [lanHost, setLanHost] = useState<Record<string, string>>({});
+  const [nearbyMsg, setNearbyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     api.listComputers().then(setComputers).catch(() => {});
@@ -87,8 +90,36 @@ export default function Settings() {
               <ActionButton title="Revoke" danger onPress={() => confirmRevoke(c)} />
             </View>
           </View>
+          <Text style={styles.section}>Nearby direct (Wi-Fi LAN)</Text>
+          <Muted>Same PC on the same Wi-Fi? Enter its LAN IP once — the app auto-connects nearby on every open, cloud otherwise.</Muted>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. 192.168.1.20"
+            placeholderTextColor={colors.muted}
+            value={lanHost[c.id] ?? ''}
+            onChangeText={(v) => setLanHost((r) => ({ ...r, [c.id]: v }))}
+            autoCapitalize="none"
+          />
+          <ActionButton
+            title="Save LAN IP & rescan nearby"
+            onPress={async () => {
+              const host = (lanHost[c.id] ?? '').trim();
+              if (!host) {
+                Alert.alert('Enter the PC LAN IP', 'Find it on the PC agent (nearby-lan log line) or via ipconfig.');
+                return;
+              }
+              await NearbyManager.rememberLanHost(c.id, host);
+              await NearbyManager.autoConnect([c.id]);
+              setNearbyMsg('Nearby scan done for ' + c.displayName + ' — open its dashboard to see the route badge.');
+            }}
+          />
         </Card>
       ))}
+      {nearbyMsg ? (
+        <Card>
+          <Muted>{nearbyMsg}</Muted>
+        </Card>
+      ) : null}
       <Card>
         <Text style={styles.title}>Security notes</Text>
         <Muted>• Tokens live only in secure storage (Keychain / Keystore), never in logs.</Muted>

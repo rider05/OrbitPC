@@ -1,6 +1,6 @@
 import { WebSocketServer } from "ws";
 import { randomUUID } from "node:crypto";
-import { commandRequestSchema } from "@orbit/protocol";
+import { NEARBY_LAN_DEFAULT_PORT, commandRequestSchema } from "@orbit/protocol";
 import { loadConfig } from "./config.js";
 import { FileSecureStore } from "./secure-store.js";
 import { CommandDispatcher } from "./dispatcher.js";
@@ -9,7 +9,7 @@ import { EnrollmentManager } from "./enrollment.js";
 import { AuditWriter } from "./audit.js";
 import type { PairingUiState } from "./pairing-ui.js";
 import { createIpcServer, PIPE_NAME } from "./ipc.js";
-import { collectStatus } from "./status.js";
+import { collectStatus, getBootId } from "./status.js";
 
 const args = new Set(process.argv.slice(2));
 
@@ -90,12 +90,23 @@ async function main(): Promise<void> {
   ipc.listen(PIPE_NAME, () => console.log(`[ipc] listening`));
   ipc.on("error", (e) => console.warn(`[ipc] ${(e as Error).message}`));
 
-  dispatcher.onResult = (res) => {
-    if (process.env.ORBITPC_VERBOSE) console.log(`[result] ${res.commandId} ${res.status} #${res.sequence}`);
-    connection?.send({ ...res });
-  };
-
   let connection: ConnectionManager | null = null;
+
+  // Nearby fan-out: LAN sockets register a per-command reply; cloud send stays.
+  const lanReplies = new Map<string, Set<(msg: unknown) => void>>();
+  const fanOutResult = (res: { commandId: string }) => {
+    if (process.env.ORBITPC_VERBOSE) console.log(`[result] ${res.commandId} ${(res as { status?: string }).status}`);
+    connection?.send({ ...res });
+    const set = lanReplies.get(res.commandId);
+    if (set) {
+      for (const reply of [...set]) {
+        try { reply(res); } catch { /* ignore */ }
+      }
+      const terminal = ["succeeded", "failed", "rejected", "expired", "cancelled", "timed_out"];
+      if (terminal.includes((res as unknown as { status: string }).status)) lanReplies.delete(res.commandId);
+    }
+  };
+  dispatcher.onResult = fanOutResult as typeof dispatcher.onResult;
 
   if (args.has("--mock-server")) {
     await runMockServer(computerId, (raw) => void dispatcher.submit(raw), dispatcher);
@@ -123,7 +134,40 @@ async function main(): Promise<void> {
     onStatusChange: (s) => console.log(`[connection] ${s}`),
   });
   connection.start();
-  dispatcher.onResult = (res) => connection?.send({ ...res });
+
+  // Nearby direct connect (opt-in, starts on boot alongside cloud).
+  // LAN-first phone path + BLE beacon hint. Cloud relay keeps running.
+  if (config.nearbyLanEnabled || config.nearbyBleEnabled) {
+    const { startNearbyLan } = await import("./nearby-lan.js");
+    if (config.nearbyLanEnabled) {
+      try {
+        await startNearbyLan({
+          port: config.nearbyLanPort || NEARBY_LAN_DEFAULT_PORT,
+          computerId,
+          computerName: config.computerName,
+          getBootId,
+          submit: (raw, reply) => {
+            const parsed = commandRequestSchema.safeParse(raw);
+            if (!parsed.success) return; // fail closed
+            const id = parsed.data.commandId;
+            if (!lanReplies.has(id)) lanReplies.set(id, new Set());
+            lanReplies.get(id)!.add(reply);
+            void dispatcher.submit(parsed.data);
+          },
+        });
+      } catch (e) {
+        console.warn(`[nearby-lan] failed to start: ${(e as Error).message}`);
+      }
+    }
+    if (config.nearbyBleEnabled) {
+      try {
+        const { startBleAdvertise } = await import("./nearby-ble.js");
+        await startBleAdvertise({ computerId, lanPort: config.nearbyLanPort || NEARBY_LAN_DEFAULT_PORT, bootId: await getBootId() });
+      } catch (e) {
+        console.warn(`[nearby-ble] failed to start: ${(e as Error).message}`);
+      }
+    }
+  }
 
   console.log(`[agent] started computer=${computerId} dryRun=${dryRun}`);
   console.log("[agent] tray: online state, last command, pairing, policies, emergency --revoke available");

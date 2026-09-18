@@ -447,3 +447,7 @@ export function errorResult(
     error: { code, message },
   };
 }
+
+// Nearby transports (LAN-first, BLE-data fallback, cloud fallback).
+// Same envelopes on every route — see nearby.ts.
+export * from './nearby.js';

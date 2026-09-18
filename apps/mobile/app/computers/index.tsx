@@ -4,6 +4,8 @@ import { FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } fr
 import { useAuth } from '../../src/auth/AuthContext';
 import { api } from '../../src/lib/api';
 import { friendlyError } from '../../src/lib/errors';
+import { NearbyManager } from '../../src/lib/nearby/NearbyManager';
+import { useNearbyRoute, routeLabel } from '../../src/lib/nearby/useNearby';
 import type { Computer } from '../../src/protocol/types';
 import { ActionButton, Card, Muted, StatusBadge } from '../../src/components/ui';
 import { colors, spacing } from '../../src/theme/tokens';
@@ -29,6 +31,9 @@ export default function Computers() {
       const list = await api.listComputers();
       setComputers(list);
       setUpdatedAt(new Date());
+      // Auto-connect: every app open / list focus probes nearby LAN + BLE,
+      // then falls back to cloud. Never blocks the list on failure.
+      NearbyManager.autoConnect(list.map((c) => c.id)).catch(() => {});
     } catch (e) {
       const err = e as Error & { code?: string };
       setError(friendlyError(err.code, err.message));
@@ -61,26 +66,7 @@ export default function Computers() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}
         ListEmptyComponent={!loading ? <Muted>No computers paired yet. Pair your PC to begin.</Muted> : null}
         renderItem={({ item }) => (
-          <Card>
-            <View style={styles.row}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.name}>{item.displayName}</Text>
-                <Muted>
-                  {item.platform} • {item.agentVersion}
-                </Muted>
-                <Muted>
-                  {item.status === 'online' ? 'Online' : 'Offline'} • last seen {timeAgo(item.lastSeenAt)}
-                </Muted>
-                {item.bootId ? <Muted>boot {item.bootId.slice(0, 12)}…</Muted> : null}
-              </View>
-              <StatusBadge status={item.status} />
-            </View>
-            <Link href={{ pathname: '/computers/[id]', params: { id: item.id } }} asChild>
-              <TouchableOpacity style={styles.open} accessibilityRole="button">
-                <Text style={styles.openText}>Open dashboard →</Text>
-              </TouchableOpacity>
-            </Link>
-          </Card>
+          <ComputerRow item={item} />
         )}
       />
       <Link href="/pair" asChild>
@@ -94,6 +80,33 @@ export default function Computers() {
         </TouchableOpacity>
       </Link>
     </View>
+  );
+}
+
+function ComputerRow({ item }: { item: Computer }) {
+  const route = useNearbyRoute(item.id);
+  return (
+    <Card>
+      <View style={styles.row}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.name}>{item.displayName}</Text>
+          <Muted>
+            {item.platform} • {item.agentVersion}
+          </Muted>
+          <Muted>
+            {item.status === 'online' ? 'Online' : 'Offline'} • last seen {timeAgo(item.lastSeenAt)}
+          </Muted>
+          {item.bootId ? <Muted>boot {item.bootId.slice(0, 12)}…</Muted> : null}
+          <Muted>{routeLabel(route)}{route !== 'cloud' ? ' • auto-connected nearby' : ''}</Muted>
+        </View>
+        <StatusBadge status={item.status} />
+      </View>
+      <Link href={{ pathname: '/computers/[id]', params: { id: item.id } }} asChild>
+        <TouchableOpacity style={styles.open} accessibilityRole="button">
+          <Text style={styles.openText}>Open dashboard →</Text>
+        </TouchableOpacity>
+      </Link>
+    </Card>
   );
 }
 

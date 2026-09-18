@@ -12,10 +12,23 @@
       "bundleIdentifier": "dev.orbitpc.mobile",
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "OrbitPC uses Bluetooth to find your PC nearby and send commands directly when Wi-Fi is unavailable.",
+        "NSLocalNetworkUsageDescription": "OrbitPC scans your local Wi-Fi network to connect directly to your PC when nearby (faster, works without internet).",
+        "NSBonjourServices": ["_orbitpc._tcp"]
       }
     },
     "android": {
       "package": "dev.orbitpc.mobile",
+      "permissions": [
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH_SCAN",
+        "BLUETOOTH_CONNECT",
+        "NEARBY_WIFI_DEVICES"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#0B0F14",
         "foregroundImage": "./assets/android-icon-foreground.png",
