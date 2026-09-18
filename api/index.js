@@ -8,17 +8,17 @@
 // (health, auth, pairing, command history). The persistent WSS relay the PC
 // agent needs cannot run on serverless functions (execution timeouts kill
 // long-lived sockets) — host the relay on a container/VM per plan.md.
-import express, { type Request, type Response } from 'express';
+import express from 'express';
 import { createApp } from '../apps/server/dist/app.js';
 
-let app: express.Express;
+let app;
 
 try {
   app = createApp();
 } catch (err) {
   console.error('Failed to initialize Orbit server app:', err);
   const fallback = express();
-  fallback.all('*', (_req: Request, res: Response) => {
+  fallback.all('*', (_req, res) => {
     res.status(500).json({
       error: {
         code: 'INITIALIZATION_FAILED',

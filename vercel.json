@@ -3,6 +3,9 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @orbit/protocol build && pnpm --filter @orbit/server build",
   "functions": {
+    "api/index.js": {
+      "runtime": "nodejs22.x"
+    },
     "api/index.ts": {
       "runtime": "nodejs22.x"
     }
