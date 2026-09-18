@@ -9,7 +9,7 @@
 // agent needs cannot run on serverless functions (execution timeouts kill
 // long-lived sockets) — host the relay on a container/VM per plan.md.
 import express, { type Request, type Response } from 'express';
-import { createApp } from '../apps/server/dist/app.js';
+import { createApp } from '../apps/server/src/app.js';
 
 let app: express.Express;
 

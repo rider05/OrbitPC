@@ -27564,10 +27564,10 @@ var require_logger = __commonJS({
   }
 });
 
-// api/index.ts
+// api/serverless.ts
 var import_express3 = __toESM(require_express2(), 1);
 
-// apps/server/dist/app.js
+// apps/server/src/app.ts
 var import_cors = __toESM(require_lib3(), 1);
 var import_express2 = __toESM(require_express2(), 1);
 
@@ -28138,7 +28138,7 @@ var helmet = Object.assign(
   }
 );
 
-// apps/server/dist/app.js
+// apps/server/src/app.ts
 var import_pino_http = __toESM(require_logger(), 1);
 
 // node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -32182,7 +32182,7 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// apps/server/dist/config/env.js
+// apps/server/src/config/env.ts
 var envSchema = external_exports.object({
   NODE_ENV: external_exports.enum(["development", "test", "production"]).default("development"),
   PORT: external_exports.coerce.number().int().min(1).max(65535).default(3e3),
@@ -32206,7 +32206,9 @@ function loadEnv() {
         if (process.env.STRICT_ENV_SECRETS === "true") {
           throw new Error(`Invalid environment: ${key} must be set to a real secret in production`);
         }
-        console.warn(`[SECURITY WARNING] ${key} is set to a dev placeholder in production. Configure a secure 32+ char secret in your environment variables.`);
+        console.warn(
+          `[SECURITY WARNING] ${key} is set to a dev placeholder in production. Configure a secure 32+ char secret in your environment variables.`
+        );
       }
     }
   }
@@ -32217,7 +32219,7 @@ function corsOrigins() {
   return env.CORS_ORIGINS.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-// apps/server/dist/lib/logger.js
+// apps/server/src/lib/logger.ts
 var import_pino = __toESM(require_pino(), 1);
 var logger = (0, import_pino.default)({
   level: env.LOG_LEVEL,
@@ -32239,7 +32241,7 @@ var logger = (0, import_pino.default)({
   }
 });
 
-// apps/server/dist/lib/errors.js
+// apps/server/src/lib/errors.ts
 var ApiError = class extends Error {
   code;
   status;
@@ -32250,7 +32252,7 @@ var ApiError = class extends Error {
   }
 };
 
-// apps/server/dist/middleware/errors.js
+// apps/server/src/middleware/errors.ts
 function notFound(req, res, _next) {
   res.status(404).json({
     error: {
@@ -32284,20 +32286,20 @@ function errorHandler(err, req, res, _next) {
   });
 }
 
-// apps/server/dist/lib/ids.js
+// apps/server/src/lib/ids.ts
 import { randomUUID } from "node:crypto";
 function newRequestId() {
   return randomUUID();
 }
 
-// apps/server/dist/middleware/requestId.js
+// apps/server/src/middleware/requestId.ts
 function requestId(req, _res, next) {
   const incoming = req.header("x-request-id");
   req.requestId = typeof incoming === "string" && incoming.length >= 1 && incoming.length <= 100 ? incoming : newRequestId();
   next();
 }
 
-// apps/server/dist/routes/health.js
+// apps/server/src/routes/health.ts
 var import_express = __toESM(require_express2(), 1);
 var healthRouter = (0, import_express.Router)();
 healthRouter.get("/health", (_req, res) => {
@@ -32310,25 +32312,29 @@ healthRouter.get("/health", (_req, res) => {
   });
 });
 
-// apps/server/dist/app.js
+// apps/server/src/app.ts
 var helmet3 = helmet;
 function createApp() {
   const app2 = (0, import_express2.default)();
   app2.disable("x-powered-by");
   app2.set("trust proxy", 1);
   app2.use(requestId);
-  app2.use((0, import_pino_http.pinoHttp)({
-    logger,
-    customProps: (req) => ({ requestId: req.requestId }),
-    // Redact auth headers at the HTTP layer too.
-    redact: ["req.headers.authorization"]
-  }));
+  app2.use(
+    (0, import_pino_http.pinoHttp)({
+      logger,
+      customProps: (req) => ({ requestId: req.requestId }),
+      // Redact auth headers at the HTTP layer too.
+      redact: ["req.headers.authorization"]
+    })
+  );
   app2.use(helmet3());
-  app2.use((0, import_cors.default)({
-    origin: corsOrigins(),
-    credentials: false,
-    maxAge: 600
-  }));
+  app2.use(
+    (0, import_cors.default)({
+      origin: corsOrigins(),
+      credentials: false,
+      maxAge: 600
+    })
+  );
   app2.use(import_express2.default.json({ limit: "256kb", strict: true }));
   app2.get("/", (_req, res) => {
     res.status(200).json({
@@ -32347,7 +32353,7 @@ function createApp() {
   return app2;
 }
 
-// api/index.ts
+// api/serverless.ts
 var app;
 try {
   app = createApp();
@@ -32364,9 +32370,9 @@ try {
   });
   app = fallback;
 }
-var index_default = app;
+var serverless_default = app;
 export {
-  index_default as default
+  serverless_default as default
 };
 /*! Bundled license information:
 

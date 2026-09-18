@@ -17,7 +17,7 @@
     "db:generate": "pnpm --filter ./apps/server db:generate",
     "db:migrate": "pnpm --filter ./apps/server db:migrate",
     "db:deploy": "pnpm --filter ./apps/server db:deploy",
-    "build:api": "esbuild api/index.ts --bundle --platform=node --format=esm --target=node22 \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js"
+    "build:api": "esbuild api/serverless.ts --bundle --platform=node --format=esm --target=node22 \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js"
   },
   "dependencies": {
     "express": "^4.21.2"
