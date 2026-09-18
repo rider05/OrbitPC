@@ -1,12 +1,23 @@
 import cors from 'cors';
 import express from 'express';
-import helmet from 'helmet';
+import helmetDefault from 'helmet';
 import { pinoHttp } from 'pino-http';
 import { corsOrigins, env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { requestId } from './middleware/requestId.js';
 import { healthRouter } from './routes/health.js';
+
+// helmet@8 ships dual CJS/ESM type definitions (index.d.cts + index.d.mts)
+// with no "types" condition in "exports". Some resolvers (observed on the
+// Vercel Linux build) pick the CJS definitions, where the default import
+// types as the non-callable exports namespace instead of the middleware
+// factory. Normalize through unknown so this compiles under either
+// resolution. At runtime Node always loads index.mjs, whose default export
+// is the factory (verified by tests + live boot).
+const helmet = helmetDefault as unknown as (
+  options?: Record<string, unknown>,
+) => express.RequestHandler;
 
 export function createApp(): express.Express {
   const app = express();
