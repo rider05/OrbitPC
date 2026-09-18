@@ -16,12 +16,14 @@
     "lint": "pnpm -r lint",
     "db:generate": "pnpm --filter ./apps/server db:generate",
     "db:migrate": "pnpm --filter ./apps/server db:migrate",
-    "db:deploy": "pnpm --filter ./apps/server db:deploy"
+    "db:deploy": "pnpm --filter ./apps/server db:deploy",
+    "build:api": "esbuild api/index.ts --bundle --platform=node --format=esm --target=node22 \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js"
   },
   "dependencies": {
     "express": "^4.21.2"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21"
+    "@types/express": "^4.17.21",
+    "esbuild": "^0.28.2"
   }
 }

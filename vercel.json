@@ -1,12 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm --filter @orbit/protocol build && pnpm --filter @orbit/server build",
+  "buildCommand": "pnpm --filter @orbit/protocol build && pnpm --filter @orbit/server build && pnpm build:api",
   "functions": {
     "api/index.js": {
-      "runtime": "nodejs22.x"
-    },
-    "api/index.ts": {
       "runtime": "nodejs22.x"
     }
   },
