@@ -6,6 +6,7 @@
   "engines": {
     "node": ">=22"
   },
+  "type": "module",
   "scripts": {
     "dev:server": "pnpm --filter ./apps/server dev",
     "dev": "pnpm --filter ./apps/server dev",
@@ -16,5 +17,11 @@
     "db:generate": "pnpm --filter ./apps/server db:generate",
     "db:migrate": "pnpm --filter ./apps/server db:migrate",
     "db:deploy": "pnpm --filter ./apps/server db:deploy"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
   }
 }

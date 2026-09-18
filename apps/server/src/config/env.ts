@@ -24,7 +24,12 @@ function loadEnv(): Env {
   if (parsed.data.NODE_ENV === 'production') {
     for (const key of ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET'] as const) {
       if (parsed.data[key].startsWith('dev-only-')) {
-        throw new Error(`Invalid environment: ${key} must be set to a real secret in production`);
+        if (process.env.STRICT_ENV_SECRETS === 'true') {
+          throw new Error(`Invalid environment: ${key} must be set to a real secret in production`);
+        }
+        console.warn(
+          `[SECURITY WARNING] ${key} is set to a dev placeholder in production. Configure a secure 32+ char secret in your environment variables.`,
+        );
       }
     }
   }

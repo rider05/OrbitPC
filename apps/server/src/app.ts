@@ -44,6 +44,15 @@ export function createApp(): express.Express {
   // Body limits: fail closed before protocol validation (64KB command cap enforced in @orbit/protocol).
   app.use(express.json({ limit: '256kb', strict: true }));
 
+  // Root endpoint for status / platform liveness
+  app.get('/', (_req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: 'orbit-server',
+      version: '0.1.0',
+    });
+  });
+
   // Unversioned liveness (load balancers) + versioned API health.
   app.get('/health', (_req, res) => {
     res.status(200).json({ ok: true });

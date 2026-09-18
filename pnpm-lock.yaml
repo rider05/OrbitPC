@@ -6,7 +6,15 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      express:
+        specifier: ^4.21.2
+        version: 4.22.3
+    devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
 
   apps/agent:
     dependencies:
