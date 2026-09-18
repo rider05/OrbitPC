@@ -1,10 +1,8 @@
 import 'dotenv/config';
 import type { Server } from 'node:http';
-import { createApp } from './app.js';
+import app, { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
-
-const app = createApp();
 
 let server: Server | undefined;
 

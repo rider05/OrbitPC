@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
 import helmetDefault from 'helmet';
@@ -76,3 +77,6 @@ export function createApp(): express.Express {
   void env;
   return app;
 }
+
+const defaultApp = createApp();
+export default defaultApp;
