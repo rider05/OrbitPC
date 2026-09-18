@@ -44,6 +44,17 @@ export function createApp(): express.Express {
   // Body limits: fail closed before protocol validation (64KB command cap enforced in @orbit/protocol).
   app.use(express.json({ limit: '256kb', strict: true }));
 
+  // Vercel serverless rewrite normalization: restore original path if rewritten to entrypoint
+  app.use((req, _res, next) => {
+    if (req.url === '/api/index.js' || req.url.startsWith('/api/index.js?')) {
+      const original = req.headers['x-matched-path'];
+      if (typeof original === 'string' && original.startsWith('/')) {
+        req.url = original;
+      }
+    }
+    next();
+  });
+
   // Root endpoint for status / platform liveness
   app.get('/', (_req, res) => {
     res.status(200).json({

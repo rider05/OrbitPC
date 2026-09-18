@@ -14,21 +14,7 @@ import { createApp } from '../apps/server/src/app.js';
 let app: express.Express;
 
 try {
-  const serverApp = createApp();
-  const serverlessApp = express();
-  // If Vercel rewrote the URL to the destination handler path (/api/index.js),
-  // restore the original requested path from x-matched-path so Express routes match.
-  serverlessApp.use((req, _res, next) => {
-    if (req.url === '/api/index.js' || req.url.startsWith('/api/index.js?')) {
-      const original = req.headers['x-matched-path'];
-      if (typeof original === 'string' && original.startsWith('/')) {
-        req.url = original;
-      }
-    }
-    next();
-  });
-  serverlessApp.use(serverApp);
-  app = serverlessApp;
+  app = createApp();
 } catch (err) {
   console.error('Failed to initialize Orbit server app:', err);
   const fallback = express();
@@ -43,4 +29,18 @@ try {
   app = fallback;
 }
 
-export default app;
+export default function handler(req: Request, res: Response): unknown {
+  try {
+    return app(req, res);
+  } catch (err) {
+    console.error('Unhandled invocation error:', err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: {
+          code: 'INTERNAL',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+}

@@ -32336,6 +32336,15 @@ function createApp() {
     })
   );
   app2.use(import_express2.default.json({ limit: "256kb", strict: true }));
+  app2.use((req, _res, next) => {
+    if (req.url === "/api/index.js" || req.url.startsWith("/api/index.js?")) {
+      const original = req.headers["x-matched-path"];
+      if (typeof original === "string" && original.startsWith("/")) {
+        req.url = original;
+      }
+    }
+    next();
+  });
   app2.get("/", (_req, res) => {
     res.status(200).json({
       ok: true,
@@ -32370,9 +32379,23 @@ try {
   });
   app = fallback;
 }
-var serverless_default = app;
+function handler(req, res) {
+  try {
+    return app(req, res);
+  } catch (err) {
+    console.error("Unhandled invocation error:", err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: {
+          code: "INTERNAL",
+          message: err instanceof Error ? err.message : String(err)
+        }
+      });
+    }
+  }
+}
 export {
-  serverless_default as default
+  handler as default
 };
 /*! Bundled license information:
 
