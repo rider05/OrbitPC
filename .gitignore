@@ -1,6 +1,9 @@
 node_modules/
 dist/
 build/
+# Generated Vercel function bundle (rebuilt by `pnpm build:api`; never commit).
+api/index.js
+apps/server/api/index.js
 coverage/
 *.tsbuildinfo
 .env

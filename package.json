@@ -20,7 +20,7 @@
     "db:generate": "pnpm --filter ./apps/server db:generate",
     "db:migrate": "pnpm --filter ./apps/server db:migrate",
     "db:deploy": "pnpm --filter ./apps/server db:deploy",
-    "build:api": "esbuild api/serverless.ts --bundle --platform=node --format=esm --target=node22 \"--banner:js=import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --outfile=api/index.js"
+    "build:api": "esbuild apps/server/src/serverless.ts --bundle --platform=node --format=cjs --target=node22 \"--footer:js=module.exports = module.exports.default || module.exports;\" --outfile=api/index.js"
   },
   "dependencies": {
     "esbuild": "^0.28.2",

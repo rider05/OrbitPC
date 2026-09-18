@@ -1,6 +1,6 @@
 // Vercel serverless entry for the Express REST API.
 //
-// The long-lived process entry (app.listen) lives in apps/server/src/server.ts
+// The long-lived process entry (app.listen) lives in ./server.js
 // and is intentionally NOT used here: a serverless function handles one
 // request per invocation.
 //
@@ -8,8 +8,13 @@
 // (health, auth, pairing, command history). The persistent WSS relay the PC
 // agent needs cannot run on serverless functions (execution timeouts kill
 // long-lived sockets) — host the relay on a container/VM per plan.md.
+//
+// Build (root package.json `build:api`) bundles this to api/index.js as CJS
+// (api/package.json pins type: commonjs). api/ must contain ONLY the
+// generated bundle: Vercel turns every file in api/ into a function, so a
+// second source file there becomes a second (shadow) function.
 import express, { type Request, type Response } from 'express';
-import { createApp } from '../apps/server/src/app.js';
+import { createApp } from './app.js';
 
 let app: express.Express;
 
