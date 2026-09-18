@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "main": "./dist/server.js",
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "pnpm --filter @orbit/protocol build && tsc -p tsconfig.json",
