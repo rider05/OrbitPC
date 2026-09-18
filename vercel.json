@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "pnpm install --prefer-offline",
+  "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter @orbit/protocol build && pnpm --filter @orbit/server build",
   "functions": {
     "api/index.ts": {
