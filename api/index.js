@@ -32356,7 +32356,19 @@ function createApp() {
 // api/serverless.ts
 var app;
 try {
-  app = createApp();
+  const serverApp = createApp();
+  const serverlessApp = (0, import_express3.default)();
+  serverlessApp.use((req, _res, next) => {
+    if (req.url === "/api/index.js" || req.url.startsWith("/api/index.js?")) {
+      const original = req.headers["x-matched-path"];
+      if (typeof original === "string" && original.startsWith("/")) {
+        req.url = original;
+      }
+    }
+    next();
+  });
+  serverlessApp.use(serverApp);
+  app = serverlessApp;
 } catch (err) {
   console.error("Failed to initialize Orbit server app:", err);
   const fallback = (0, import_express3.default)();
