@@ -1,0 +1,14 @@
+<service>
+  <id>OrbitPCAgent</id>
+  <name>OrbitPC Agent</name>
+  <description>OrbitPC M2/M3 agent — secure remote command relay (device credential + Ed25519 proof).</description>
+  <env name="ORBITPC_SERVICE" value="1" />
+  <executable>node</executable>
+  <arguments>"C:\ProgramData\OrbitPC\agent\dist\service.js"</arguments>
+  <workingdirectory>C:\ProgramData\OrbitPC\agent</workingdirectory>
+  <log mode="rotate">
+    <logpath>C:\ProgramData\OrbitPC\agent\logs</logpath>
+    <sizeThreshold>10240</sizeThreshold>
+  </log>
+  <failureprogram />
+</service>

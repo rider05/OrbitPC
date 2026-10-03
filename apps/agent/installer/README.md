@@ -12,6 +12,28 @@ cd apps\agent
 sc.exe start OrbitPCAgent
 ```
 
+### Recommended: WinSW service wrapper
+
+For a real Windows service (proper `SERVICE_RUNNING` reporting to the SCM):
+
+```powershell
+.\installer\install-winsw.ps1
+```
+
+This builds the agent, downloads `WinSW-x64.exe`, registers it as
+`OrbitPCAgent.exe` with `OrbitPCAgent.xml` beside it, and installs the service.
+Use this instead of `install.ps1` for production-like deployments.
+
+### User-session helper (interactive ops outside Session 0)
+
+```powershell
+.\installer\install-helper-task.ps1
+```
+
+Registers a scheduled task that runs `dist/helper.js` at interactive logon with
+highest privileges. The service forwards lock/clipboard/notification/capture
+operations to this helper via named-pipe IPC (see `src/ipc.ts`).
+
 ## Uninstall
 
 ```powershell
