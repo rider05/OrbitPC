@@ -8,6 +8,21 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: orbit
+          POSTGRES_PASSWORD: orbit_dev_pw
+          POSTGRES_DB: orbit
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U orbit -d orbit"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://orbit:orbit_dev_pw@localhost:5432/orbit?schema=public
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -22,6 +37,7 @@ jobs:
       - run: pnpm --filter ./packages/protocol test
       - run: pnpm --filter ./packages/protocol-alias build
       - run: pnpm --filter ./apps/server typecheck
+      - run: pnpm --dir ./apps/server exec prisma migrate deploy
       - run: pnpm --filter ./apps/server test
       - run: pnpm --filter ./apps/server build
       - run: pnpm --dir ./apps/server exec prisma validate

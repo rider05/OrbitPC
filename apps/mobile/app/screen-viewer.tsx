@@ -2,7 +2,6 @@ import { useLocalSearchParams, Link } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { io as sioClient, type Socket as ClientSocket } from 'socket.io-client';
-import { api } from '../src/lib/api';
 import { getApiUrl } from '../src/lib/config';
 import { loadSession } from '../src/lib/secure-store';
 import { colors, spacing } from '../src/theme/tokens';

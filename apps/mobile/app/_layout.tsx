@@ -20,6 +20,14 @@ export default function RootLayout() {
         <Stack.Screen name="pair" options={{ title: 'Pair computer' }} />
         <Stack.Screen name="commands/[id]" options={{ title: 'Command' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="screen-viewer" options={{ title: 'Remote Screen' }} />
+        <Stack.Screen name="touchpad" options={{ title: 'Touchpad' }} />
+        <Stack.Screen name="keyboard" options={{ title: 'Keyboard' }} />
+        <Stack.Screen name="files" options={{ title: 'Files' }} />
+        <Stack.Screen name="clipboard" options={{ title: 'Clipboard' }} />
+        <Stack.Screen name="audio" options={{ title: 'Audio' }} />
+        <Stack.Screen name="apps" options={{ title: 'Apps' }} />
+        <Stack.Screen name="activity" options={{ title: 'Activity' }} />
       </Stack>
     </AuthProvider>
   );

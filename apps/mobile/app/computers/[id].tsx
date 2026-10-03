@@ -150,6 +150,37 @@ export default function ComputerDashboard() {
         </View>
       </Card>
 
+      <Card>
+        <Text style={styles.section}>Select PC tools (plan §28)</Text>
+        <Link href={{ pathname: '/screen-viewer', params: { id: typeof id === 'string' ? id : '' } }} asChild>
+          <Text style={styles.link}>Remote Screen →</Text>
+        </Link>
+        <Link href="/touchpad" asChild>
+          <Text style={styles.link}>Touchpad →</Text>
+        </Link>
+        <Link href="/keyboard" asChild>
+          <Text style={styles.link}>Keyboard →</Text>
+        </Link>
+        <Link href="/files" asChild>
+          <Text style={styles.link}>Files →</Text>
+        </Link>
+        <Link href="/clipboard" asChild>
+          <Text style={styles.link}>Clipboard →</Text>
+        </Link>
+        <Link href="/audio" asChild>
+          <Text style={styles.link}>Audio →</Text>
+        </Link>
+        <Link href="/apps" asChild>
+          <Text style={styles.link}>Apps →</Text>
+        </Link>
+        <Link href="/activity" asChild>
+          <Text style={styles.link}>Activity →</Text>
+        </Link>
+        <Link href="/settings" asChild>
+          <Text style={styles.link}>Settings →</Text>
+        </Link>
+      </Card>
+
       {uncertain && pending ? (
         <Card>
           <Text style={styles.uncertain}>Action uncertain — verifying</Text>
