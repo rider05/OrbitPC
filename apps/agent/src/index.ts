@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const store = new FileSecureStore(config.dataDir);
   const audit = new AuditWriter(config.dataDir);
-  const secrets = await store.load();
+  let secrets = await store.load();
   let computerId = config.computerId || secrets.computerId || randomUUID();
   const httpBase = (process.env.ORBITPC_SERVER_HTTP || "http://localhost:3000").replace(/\/$/, "");
   let effectiveCredentialId: string | null = config.credentialId || secrets.credentialId || null;
@@ -132,11 +132,13 @@ async function main(): Promise<void> {
   }
 
   const dryRun = process.env.ORBITPC_DRY_RUN !== "0"; // default safe: never lock/sleep dev box
+  secrets = await store.load(); // pairing above may have written the keypair after initial load
   const dispatcher = new CommandDispatcher({
     computerId,
     adapterCtx: { allowedApps: config.allowedApps, dryRun },
     clipboardOptIn: config.clipboardOptIn,
     allowPowerOps: config.allowSleepRestartShutdown,
+    allowScreenCapture: config.allowScreenCapture,
     allowedApps: config.allowedApps,
     dataDir: config.dataDir,
     audit,
@@ -232,11 +234,30 @@ async function main(): Promise<void> {
       return rawWsUrl;
     }
   })();
+  const streamer = new ((await import("./screen-stream.js")).ScreenStreamer)(
+    { computerId, allowedApps: config.allowedApps, dryRun },
+    (msg) => connection?.send(msg),
+  );
   connection = new ConnectionManager({
     serverUrl: wsUrlWithComputer,
     credentialId: effectiveCredentialId,
-    signNonce: () => null, // wired to Ed25519 key once enrolled
+    signNonce: (nonce) => {
+      const pem = secrets.privateKeyPem;
+      if (!pem) return null; // unpaired / stale — bearer-only, dev mode
+      try {
+        return Buffer.from(EnrollmentManager.signWithPem(pem, nonce));
+      } catch {
+        return null;
+      }
+    },
     getAgentToken: () => liveCredential,
+    onScreenStart: (msg) => {
+      streamer.stop();
+      // ScreenStreamer interval is fixed at 500ms/2fps; fps is accepted but
+      // clamped later when we add an adaptive quality selector.
+      streamer.start();
+    },
+    onScreenStop: () => streamer.stop(),
     onCommandRequest: (raw) => {
       const parsed = commandRequestSchema.safeParse(raw);
       if (!parsed.success) return; // fail closed
@@ -253,6 +274,7 @@ async function main(): Promise<void> {
   // result posts. Runs whenever this agent holds a credential.
   // Refresh from store: a pairing completed above in this same process.
   liveCredential = (await store.load()).credential ?? liveCredential;
+  secrets = await store.load(); // refresh keypair captured before QR-first pairing
   if (effectiveCredentialId || liveCredential) {
     poll = new PollTransport({
       httpBase,
@@ -323,6 +345,7 @@ async function main(): Promise<void> {
   console.log("[agent] tray: online state, last command, pairing, policies, emergency --revoke available");
 
   const shutdown = () => {
+    try { streamer.stop(); } catch { /* ignore */ }
     try { stopNearby?.(); } catch { /* ignore */ }
     try { poll?.stop(); } catch { /* ignore */ }
     connection?.stop();

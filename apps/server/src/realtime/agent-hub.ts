@@ -1,5 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
+import { verify } from 'node:crypto';
 import WebSocket, { WebSocketServer } from 'ws';
 import { z } from 'zod';
 import { db } from '../lib/db.js';
@@ -32,6 +33,15 @@ const heartbeatMessageSchema = z.object({
   bootId: z.string().min(1).max(200),
   agentVersion: z.string().max(50).optional(),
   at: z.string().optional(),
+});
+
+const screenFrameMessageSchema = z.object({
+  type: z.literal('screen.frame'),
+  computerId: z.string().uuid(),
+  format: z.enum(['png', 'jpeg']),
+  seq: z.number().int().min(0),
+  capturedAt: z.string().optional(),
+  frameBase64: z.string().max(192 * 1024),
 });
 
 export interface AgentHubOptions {
@@ -141,6 +151,16 @@ export class AgentHub {
       }
       return;
     }
+    const frame = screenFrameMessageSchema.safeParse(parsed);
+    if (frame.success) {
+      if (frame.data.computerId !== computerId) return; // fail closed
+      this.opts.mobileHub.broadcastToOwnerSocket(
+        computerId,
+        'screen.frame',
+        frame.data,
+      );
+      return;
+    }
     // Unknown shape: ignore (fail closed by doing nothing).
   }
 
@@ -152,6 +172,11 @@ export class AgentHub {
     for (const ws of set) {
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
+  }
+
+  /** Push a screen-control message (start/stop) to a connected agent. */
+  pushScreenControl(computerId: string, msg: unknown): void {
+    this.pushCommandRequest(computerId, msg);
   }
 
   /** Revocation: tell the agent and drop its sockets immediately. */
@@ -184,7 +209,7 @@ export class AgentHub {
       socket.destroy();
       return;
     }
-    void this.authorize(computerId, credential)
+    void this.authorize(computerId, credential, req)
       .then((ok) => {
         if (!ok) {
           socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
@@ -200,10 +225,27 @@ export class AgentHub {
       });
   }
 
-  private async authorize(computerId: string, credential: string): Promise<boolean> {
+  private async authorize(computerId: string, credential: string, req: IncomingMessage): Promise<boolean> {
     const computer = await db.computer.findUnique({ where: { id: computerId } });
     if (!computer || computer.revokedAt) return false;
     const creds = await db.computerCredential.findMany({ where: { computerId: computer.id, revokedAt: null } });
-    return creds.some((c) => safeEqualHex(sha256Hex(credential), c.credentialHash));
+    const credOk = creds.some((c) => safeEqualHex(sha256Hex(credential), c.credentialHash));
+    if (!credOk) return false;
+    // When the computer registered an Ed25519 identity key, require a proof-of-
+    // possession nonce signature on every WSS upgrade (plan.md §8). Weak or
+    // missing proof => reject even if the device credential matches — the
+    // credential alone is no longer sufficient once a key is registered.
+    if (!computer.publicKey) return true; // legacy/mock computer: bearer-only
+    const nonceB64 = req.headers['x-nonce'];
+    const proofB64 = req.headers['x-nonce-proof'];
+    if (typeof nonceB64 !== 'string' || typeof proofB64 !== 'string') return false;
+    try {
+      const nonce = Buffer.from(nonceB64, 'base64');
+      const proof = Buffer.from(proofB64, 'base64');
+      if (nonce.length !== 32 || proof.length !== 64) return false;
+      return verify(null, nonce, { key: computer.publicKey }, proof);
+    } catch {
+      return false;
+    }
   }
 }

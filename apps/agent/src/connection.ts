@@ -13,6 +13,8 @@ export interface ConnectionOptions {
   onCommandRequest: (raw: unknown) => void;
   onStatusChange: (s: "connecting" | "online" | "offline") => void;
   heartbeatMs?: number;
+  onScreenStart?: (msg: { fps?: number }) => void;
+  onScreenStop?: () => void;
 }
 
 export class ConnectionManager {
@@ -99,6 +101,14 @@ export class ConnectionManager {
           }
           if (msg.type === "command.request") {
             this.opts.onCommandRequest(msg);
+            return;
+          }
+          if (msg.type === "screen.start") {
+            this.opts.onScreenStart?.(msg as { fps?: number });
+            return;
+          }
+          if (msg.type === "screen.stop") {
+            this.opts.onScreenStop?.();
             return;
           }
           if (msg.type === "revoked") {

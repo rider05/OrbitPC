@@ -1,9 +1,48 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
 
-// Secure-store abstraction. Prod Windows: DPAPI / Credential Manager scoped to
-// the service identity (to be wired via native module). Dev fallback: file in
-// dataDir with 0600 + explicit warning. Helper process never calls this.
+// Secure-store abstraction. On Windows, secrets are wrapped with DPAPI
+// (ProtectedData, CurrentUser scope) so a plain file read on another account /
+// machine is useless. Dev fallback on non-Windows / CI: plaintext JSON with 0600.
+
+async function protect(payload: string): Promise<string> {
+  if (process.platform !== "win32" || process.env.ORBITPC_DPAPI === "0") return payload;
+  const b64 = Buffer.from(payload, "utf8").toString("base64");
+  const script = [
+    "Add-Type -AssemblyName System.Security",
+    "$bytes = [Convert]::FromBase64String($env:ORB_PLAIN)",
+    "$enc = [System.Security.Cryptography.ProtectedData]::Protect($bytes, $null, 'CurrentUser')",
+    "[Convert]::ToBase64String($enc)",
+  ].join('; ');
+  return new Promise((resolve, reject) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, ORB_PLAIN: b64 }, shell: false }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout.trim());
+    });
+  });
+}
+
+async function unprotect(payload: string): Promise<string> {
+  if (process.platform !== "win32" || process.env.ORBITPC_DPAPI === "0") return payload;
+  const script = [
+    "Add-Type -AssemblyName System.Security",
+    "$bytes = [Convert]::FromBase64String($env:ORB_ENC)",
+    "$dec = [System.Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, 'CurrentUser')",
+    "[Convert]::ToBase64String($dec)",
+  ].join('; ');
+  const protectedB64 = payload;
+  return new Promise((resolve, reject) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, ORB_ENC: protectedB64 }, shell: false }, (err, stdout) => {
+      if (err) reject(err);
+      else {
+        try {
+          resolve(Buffer.from(stdout.trim(), 'base64').toString('utf8'));
+        } catch (e) { reject(e); }
+      }
+    });
+  });
+}
 
 export interface SecretBundle {
   credentialId?: string;
@@ -29,18 +68,27 @@ export class FileSecureStore {
   async load(): Promise<SecretBundle> {
     try {
       const raw = await fs.readFile(this.file, "utf8");
-      return JSON.parse(raw) as SecretBundle;
+      const plaintext = await unprotect(raw);
+      return JSON.parse(plaintext) as SecretBundle;
     } catch (err: unknown) {
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return {};
-      throw err;
+      // Fall back: a pre-DPAPI plaintext secrets.json parses directly.
+      try {
+        const raw = await fs.readFile(this.file, "utf8");
+        return JSON.parse(raw) as SecretBundle;
+      } catch {
+        throw err;
+      }
     }
   }
 
   async save(bundle: SecretBundle): Promise<void> {
     await fs.mkdir(this.dataDir, { recursive: true });
-    await fs.writeFile(this.file, JSON.stringify(bundle), { mode: 0o600 });
+    const plaintext = JSON.stringify(bundle);
+    const wrapped = await protect(plaintext);
+    await fs.writeFile(this.file, wrapped, { mode: 0o600 });
     if (process.platform !== "win32") {
-      console.warn("[secure-store] dev file fallback in use — wire DPAPI/Credential Manager on Windows");
+      console.warn("[secure-store] dev file fallback in use — DPAPI is Windows-only");
     }
   }
 

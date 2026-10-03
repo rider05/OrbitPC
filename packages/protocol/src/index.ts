@@ -86,6 +86,8 @@ export const COMMAND_NAMES = [
   'app.launch',
   'notification.show',
   'clipboard.setText',
+  // M3 remote-desktop Stage 1: on-demand screen snapshot (PNG/JPEG, not a stream).
+  'screen.capture',
 ] as const;
 
 export type CommandName = (typeof COMMAND_NAMES)[number];
@@ -107,7 +109,7 @@ export type CommandStatus = (typeof COMMAND_STATUSES)[number];
 
 export interface CommandCatalogEntry {
   name: CommandName;
-  stage: 'M2a' | 'M2b';
+  stage: 'M2a' | 'M2b' | 'M3';
   description: string;
   /** Max requests per window for this command (server-enforced). */
   quota: { limit: number; windowSec: number };
@@ -207,6 +209,16 @@ export const COMMAND_CATALOG: Record<CommandName, CommandCatalogEntry> = {
     rejectWhenOffline: false,
     destructive: false,
   },
+  'screen.capture': {
+    name: 'screen.capture',
+    stage: 'M3',
+    description: 'On-demand compressed screenshot (Stage 1 remote desktop; opt-in local policy).',
+    quota: { limit: 12, windowSec: 60 },
+    requiresConfirmation: true,
+    requiresRecentAuth: false,
+    rejectWhenOffline: false,
+    destructive: false,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -236,6 +248,13 @@ const clipboardArgs = z
   })
   .strict();
 
+const screenCaptureArgs = z
+  .object({
+    /** Screenshot format; agent may downscale to stay under the 64KB envelope. */
+    format: z.enum(['png', 'jpeg']).default('png'),
+  })
+  .strict();
+
 export const commandArgsSchemas: Record<CommandName, z.ZodTypeAny> = {
   'system.getStatus': noArgs,
   'system.lock': noArgs,
@@ -245,6 +264,7 @@ export const commandArgsSchemas: Record<CommandName, z.ZodTypeAny> = {
   'app.launch': appLaunchArgs,
   'notification.show': notificationArgs,
   'clipboard.setText': clipboardArgs,
+  'screen.capture': screenCaptureArgs,
 };
 
 // ---------------------------------------------------------------------------
@@ -318,6 +338,26 @@ export const commandResultSchema = z
   .strict();
 
 export type CommandResult = z.infer<typeof commandResultSchema>;
+
+// ---------------------------------------------------------------------------
+// Screen-frame envelope (M3 Stage 2 — view-only streaming over the agent WSS)
+// ---------------------------------------------------------------------------
+
+export const screenFrameSchema = z
+  .object({
+    v: z.literal(PROTOCOL_VERSION),
+    type: z.literal('screen.frame'),
+    computerId: uuidSchema,
+    format: z.enum(['png', 'jpeg']),
+    /** Monotonic per stream. */
+    seq: z.number().int().min(0),
+    capturedAt: isoDateSchema,
+    /** Base64 encoded PNG/JPEG frame (compressed; still keep under ~128KB). */
+    frameBase64: z.string().max(192 * 1024),
+  })
+  .strict();
+
+export type ScreenFrame = z.infer<typeof screenFrameSchema>;
 
 // ---------------------------------------------------------------------------
 // Time / size helpers (server time authoritative)

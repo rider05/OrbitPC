@@ -14,6 +14,7 @@ import {
 } from "@orbit/protocol";
 import { checkPolicy } from "./policy.js";
 import {
+  captureScreen,
   getStatus,
   launchApp,
   lockWorkstation,
@@ -30,6 +31,7 @@ export interface DispatcherOptions {
   clipboardOptIn: boolean;
   allowPowerOps: boolean;
   allowedApps: Record<string, string>;
+  allowScreenCapture?: boolean;
   dataDir: string;
   audit: AuditWriter;
   commandTimeoutMs?: number;
@@ -114,6 +116,7 @@ export class CommandDispatcher {
       clipboardOptIn: this.opts.clipboardOptIn,
       allowPowerOps: this.opts.allowPowerOps,
       allowedApps: this.opts.allowedApps,
+      allowScreenCapture: this.opts.allowScreenCapture,
     });
     if (!policy.allowed) {
       this.emit(makeError(req.commandId, this.nextSeq(req.commandId), policy.code, policy.message));
@@ -190,6 +193,10 @@ export class CommandDispatcher {
       case "system.shutdown":
         await powerOps.shutdown(this.opts.adapterCtx);
         return { shutdownInitiated: true };
+      case "screen.capture": {
+        const fmt = (args.format as 'png' | 'jpeg' | undefined) ?? 'png';
+        return captureScreen(this.opts.adapterCtx, fmt) as unknown as Record<string, unknown>;
+      }
       default:
         throw new Error("Not allowlisted");
     }

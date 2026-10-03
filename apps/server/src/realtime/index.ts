@@ -7,6 +7,8 @@ import { MobileHub } from './mobile-hub.js';
 export interface RealtimeHub {
   /** Push a persisted command envelope to a connected agent (low-latency path). */
   pushCommandRequest(computerId: string, envelope: unknown): void;
+  /** Push a screen-control message (start/stop) to a connected agent. */
+  pushScreenControl(computerId: string, msg: unknown): void;
   /** Hint to the computer owner's mobile sockets that a command changed. */
   hintCommandResult(computerId: string, commandId: string): void;
   /** Revoke: send 'revoked' + close the agent's WSS immediately. */
@@ -23,6 +25,7 @@ let hub: RealtimeHub | null = null;
 export function attachRealtime(server: HttpServer): RealtimeHub {
   const mobileHub = new MobileHub(server);
   const agentHub = new AgentHub({ mobileHub });
+  mobileHub.agentHub = agentHub;
   server.on('upgrade', (req, socket, head) => {
     // Agent WSS only; leave /socket.io upgrades to the socket.io engine.
     let pathname = '/';
@@ -37,6 +40,7 @@ export function attachRealtime(server: HttpServer): RealtimeHub {
   });
   hub = {
     pushCommandRequest: (computerId, envelope) => agentHub.pushCommandRequest(computerId, envelope),
+    pushScreenControl: (computerId, msg) => agentHub.pushScreenControl(computerId, msg),
     hintCommandResult: (computerId, commandId) => mobileHub.hintCommandResult(computerId, commandId),
     closeAgentSockets: (computerId) => agentHub.closeComputers(computerId),
     closeSessionSockets: (sessionId) => mobileHub.closeSessionSockets(sessionId),

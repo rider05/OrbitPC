@@ -9,6 +9,8 @@ export interface PolicyInput {
   clipboardOptIn: boolean;
   allowPowerOps: boolean;
   allowedApps: Record<string, string>;
+  /** Screen capture is opt-in (ORBITPC_SCREEN=1) — default deny. */
+  allowScreenCapture?: boolean;
 }
 
 export type PolicyDecision =
@@ -56,6 +58,12 @@ export function checkPolicy(input: PolicyInput): PolicyDecision {
         return { allowed: false, code: "POLICY_DENIED", message: `${RATE_NOTE} Power operations disabled locally.` };
       }
       return { allowed: true };
+    case "screen.capture": {
+      if (!input.allowScreenCapture) {
+        return { allowed: false, code: "POLICY_DENIED", message: `${RATE_NOTE} Screen capture is opt-in and disabled.` };
+      }
+      return { allowed: true };
+    }
     default:
       return { allowed: false, code: "COMMAND_NOT_ALLOWED", message: "Unknown command (default deny)." };
   }

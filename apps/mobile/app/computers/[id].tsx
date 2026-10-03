@@ -191,6 +191,11 @@ export default function ComputerDashboard() {
       <TextInput style={styles.input} value={clip} onChangeText={setClip} placeholder="Text to place on PC clipboard" placeholderTextColor={colors.muted} maxLength={4096} />
       <ActionButton title="Set PC clipboard" onPress={() => submit('clipboard.setText', { text: clip })} disabled={clip.length === 0} loading={sending} />
 
+      <Text style={styles.section}>Remote screen</Text>
+      <Link href={{ pathname: '/screen-viewer', params: { id: typeof id === 'string' ? id : '' } }} asChild>
+        <Text style={styles.link}>Open screen viewer →</Text>
+      </Link>
+
       <Text style={styles.section}>Recent activity</Text>
       {history.length === 0 ? <Muted>No commands yet.</Muted> : null}
       {history.slice(0, 20).map((c) => (

@@ -18,7 +18,8 @@ export type CommandName =
   | 'system.shutdown'
   | 'app.launch'
   | 'notification.show'
-  | 'clipboard.setText';
+  | 'clipboard.setText'
+  | 'screen.capture';
 
 export type CommandStatus =
   | 'queued'
@@ -124,6 +125,7 @@ export const COMMAND_RISK: Record<CommandName, { destructive: boolean; requiresR
   'app.launch': { destructive: false, requiresRecentAuth: false, confirm: false },
   'notification.show': { destructive: false, requiresRecentAuth: false, confirm: false },
   'clipboard.setText': { destructive: false, requiresRecentAuth: false, confirm: true },
+  'screen.capture': { destructive: false, requiresRecentAuth: false, confirm: true },
   'system.sleep': { destructive: true, requiresRecentAuth: false, confirm: true },
   'system.restart': { destructive: true, requiresRecentAuth: true, confirm: true },
   'system.shutdown': { destructive: true, requiresRecentAuth: true, confirm: true },

@@ -60,6 +60,62 @@ export async function setClipboardText(text: string): Promise<{ set: boolean; si
   return { set: true, simulated: true };
 }
 
+/**
+ * Remote-desktop Stage 1: on-demand screenshot of the primary monitor.
+ * Returns a capped base64 PNG/JPEG (data URI body, no header) suitable for
+ * embedding in a command.result — bounded so it fits the 64KB envelope.
+ * Dry-run / non-Windows returns a 1px placeholder; never silently fails.
+ */
+export async function captureScreen(
+  ctx: AdapterContext,
+  format: 'png' | 'jpeg',
+): Promise<{ simulated: boolean; format: 'png' | 'jpeg'; width: number; height: number; pngBase64?: string; jpegBase64?: string; capturedAt: string }> {
+  if (ctx.dryRun || process.platform !== 'win32') {
+    return {
+      simulated: true,
+      format,
+      width: 1,
+      height: 1,
+      pngBase64: format === 'png' ? 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/lKJ8bwAAAABJRU5ErkJggg==' : undefined,
+      jpegBase64: format === 'jpeg' ? '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAAAv/EABQBAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AK//Z' : undefined,
+      capturedAt: new Date().toISOString(),
+    };
+  }
+  const { execFile } = await import('node:child_process');
+  const os = await import('node:os');
+  const osPath = await import('node:path');
+  const fs = await import('node:fs/promises');
+  const out = osPath.join(os.tmpdir(), `orbitpc-shot-${Date.now()}.${format === 'jpeg' ? 'jpg' : 'png'}`);
+  const script = [
+    'Add-Type -AssemblyName System.Drawing; Add-Type -AssemblyName System.Windows.Forms',
+    '$screens = [System.Windows.Forms.Screen]::AllScreens',
+    '$b = $screens[0].Bounds',
+    '$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height',
+    '$g = [System.Drawing.Graphics]::FromImage($bmp)',
+    '$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)',
+    `$bmp.Save('${out}')`,
+    '$g.Dispose(); $bmp.Dispose()',
+  ].join('; ');
+  try {
+    await new Promise<void>((resolve, reject) => {
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { shell: false, timeout: 15000 }, (err) => (err ? reject(err) : resolve()));
+    });
+    const buf = await fs.readFile(out, { encoding: null });
+    // Cap the payload so a command.result never blows past 64KB.
+    const capped = buf.length > 40 * 1024 ? buf.subarray(0, 40 * 1024) : buf;
+    return {
+      simulated: false,
+      format,
+      width: 0,
+      height: 0,
+      ...(format === 'jpeg' ? { jpegBase64: capped.toString('base64') } : { pngBase64: capped.toString('base64') }),
+      capturedAt: new Date().toISOString(),
+    };
+  } finally {
+    await fs.rm(out, { force: true }).catch(() => {});
+  }
+}
+
 async function runPower(ctx: AdapterContext, exe: string, args: string[]): Promise<{ simulated: boolean }> {
   if (ctx.dryRun) {
     console.log(`[power:dry-run] ${exe} ${args.join(" ")}`);

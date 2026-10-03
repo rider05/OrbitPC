@@ -10,6 +10,8 @@ export interface AgentConfig {
   allowedApps: Record<string, string>;
   clipboardOptIn: boolean;
   allowSleepRestartShutdown: boolean;
+  /** Opt-in local policy for screen capture (default OFF). */
+  allowScreenCapture: boolean;
   /** Opt-in LAN listener for nearby direct connect (default OFF — opens a LAN port). */
   nearbyLanEnabled: boolean;
   nearbyLanPort: number;
@@ -45,6 +47,7 @@ export function loadConfig(): AgentConfig {
     allowedApps: parseAllowedApps(process.env.ORBITPC_ALLOWED_APPS),
     clipboardOptIn: process.env.ORBITPC_CLIPBOARD_OPT_IN === "1",
     allowSleepRestartShutdown: process.env.ORBITPC_ALLOW_POWER !== "0",
+    allowScreenCapture: process.env.ORBITPC_SCREEN === "1",
     nearbyLanEnabled: process.env.ORBITPC_NEARBY_LAN === "1",
     nearbyLanPort: Number(process.env.ORBITPC_NEARBY_PORT || 11430),
     nearbyLanHost: process.env.ORBITPC_NEARBY_HOST || "0.0.0.0",

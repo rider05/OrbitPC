@@ -18,6 +18,8 @@ interface SocketAuth {
 export class MobileHub {
   private io: SocketIOServer;
   private nsp: Namespace;
+  /** Set after construction: agent hub is created after this hub. */
+  agentHub: { pushScreenControl(computerId: string, msg: unknown): void } | null = null;
 
   constructor(server: HttpServer) {
     this.io = new SocketIOServer(server, {
@@ -44,6 +46,12 @@ export class MobileHub {
       socket.on('auth.refresh', (msg: unknown) => {
         void this.onAuthRefresh(socket, msg);
       });
+      socket.on('screen.start', (msg: unknown) => {
+        void this.onScreenControl(socket, msg, 'screen.start');
+      });
+      socket.on('screen.stop', (msg: unknown) => {
+        void this.onScreenControl(socket, msg, 'screen.stop');
+      });
     });
   }
 
@@ -60,6 +68,17 @@ export class MobileHub {
     })();
   }
 
+  /** Emit an event to the computer owner's sockets (screen frames etc.). */
+  async broadcastToOwnerSocket(computerId: string, event: string, payload: unknown): Promise<void> {
+    try {
+      const computer = await db.computer.findUnique({ where: { id: computerId } });
+      if (!computer || computer.revokedAt) return;
+      this.nsp.to(`user:${computer.ownerUserId}`).emit(event, payload);
+    } catch (err) {
+      logger.warn({ err, computerId, event }, 'mobile-hub: broadcast failed');
+    }
+  }
+
   /** Logout / revoke: drop all live sockets for this session immediately. */
   closeSessionSockets(sessionId: string): void {
     for (const socket of this.nsp.sockets.values()) {
@@ -71,6 +90,23 @@ export class MobileHub {
           // ignore
         }
       }
+    }
+  }
+
+  private async onScreenControl(
+    socket: Socket,
+    msg: unknown,
+    kind: 'screen.start' | 'screen.stop',
+  ): Promise<void> {
+    try {
+      const computerId = (msg as { computerId?: unknown } | null)?.computerId;
+      if (typeof computerId !== 'string') return;
+      const computer = await db.computer.findUnique({ where: { id: computerId } });
+      const auth = socket.data as SocketAuth;
+      if (!computer || computer.ownerUserId !== auth.userId || computer.revokedAt) return;
+      this.agentHub?.pushScreenControl(computerId, { ...(msg as object), type: kind });
+    } catch (err) {
+      logger.warn({ err, kind }, 'mobile-hub: screen control failed');
     }
   }
 
