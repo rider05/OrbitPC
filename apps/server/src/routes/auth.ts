@@ -4,7 +4,9 @@ import { ApiError } from '../lib/errors.js';
 import { db } from '../lib/db.js';
 import { hashPassword, newOpaqueToken, sha256Hex, safeEqualHex, verifyPassword } from '../lib/secrets.js';
 import { signAccessToken } from '../lib/tokens.js';
+import { logger } from '../lib/logger.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { getRealtimeHub } from '../realtime/index.js';
 
 export const authRouter = Router();
 
@@ -105,7 +107,16 @@ authRouter.post('/refresh', async (req, res, next) => {
       !session.revokedAt &&
       session.expiresAt.getTime() > Date.now() &&
       safeEqualHex(sha256Hex(body.refreshToken), session.refreshTokenHash);
-    if (!session || !ok) throw new ApiError('AUTH_REQUIRED', 401, 'Session expired. Please sign in again.');
+    if (!session || !ok) {
+      // Reuse detection: a live session presented with a WRONG refresh token
+      // means the stored one may be stolen. Kill the session (M3 hardening).
+      if (session && !session.revokedAt && session.expiresAt.getTime() > Date.now()) {
+        logger.warn({ sessionId: session.id, userId: session.userId }, 'refresh token reuse detected — session revoked');
+        await db.userSession.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+        getRealtimeHub()?.closeSessionSockets(session.id);
+      }
+      throw new ApiError('AUTH_REQUIRED', 401, 'Session expired. Please sign in again.');
+    }
     // Rotate: the presented refresh token dies here; a new one is issued.
     const refreshToken = newOpaqueToken();
     await db.userSession.update({
@@ -133,6 +144,8 @@ authRouter.post('/logout', async (req, res, next) => {
       where: { id: body.sessionId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    // M3: revocation closes live sockets immediately (not just at next request).
+    getRealtimeHub()?.closeSessionSockets(body.sessionId);
     res.json({ ok: true });
   } catch (err) {
     next(err);

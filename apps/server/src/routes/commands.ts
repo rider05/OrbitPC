@@ -4,23 +4,11 @@ import { COMMAND_CATALOG, COMMAND_EXPIRY_SEC, commandArgsSchemas, type CommandNa
 import { ApiError, Errors } from '../lib/errors.js';
 import { db } from '../lib/db.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { applyCommandResult, redactArgs } from '../lib/command-results.js';
+import { getRealtimeHub } from '../realtime/index.js';
 import { isOnline, requireAgent } from './computers.js';
 
 export const commandsRouter = Router();
-
-const TERMINAL = new Set(['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'timed_out']);
-
-function redactArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
-  if (name === 'clipboard.setText') return { textLength: String(args.text ?? '').length };
-  if (name === 'notification.show') return { title: args.title, bodyLength: String(args.body ?? '').length };
-  return args;
-}
-
-function redactResult(result: Record<string, unknown> | null): Record<string, unknown> | null {
-  if (!result) return null;
-  // Status payloads carry no user content (bootId/hostname/counters/flags) — keep.
-  return result;
-}
 
 type CommandRow = {
   id: string;
@@ -149,6 +137,19 @@ commandsRouter.post('/computers/:id/commands', requireAuth, async (req, res, nex
         },
       });
       res.status(201).json(await toCommandRecord(created));
+      // Low-latency push hint to a connected agent; polling stays authoritative.
+      getRealtimeHub()?.pushCommandRequest(computerId, {
+        v: 1,
+        type: 'command.request',
+        commandId: created.id,
+        idempotencyKey: created.idempotencyKey,
+        computerId: created.computerId,
+        name: created.name,
+        args: (body.args ?? {}) as Record<string, unknown>,
+        requestedAt: created.createdAt.toISOString(),
+        expiresAt: created.expiresAt.toISOString(),
+        requestContext: { mobileSessionId: req.auth!.sessionId },
+      });
     } catch (e: unknown) {
       // Race on (session, idempotencyKey) or commandId reuse.
       if (typeof e === 'object' && e !== null && 'code' in e && (e as { code: string }).code === 'P2002') {
@@ -233,42 +234,8 @@ commandsRouter.post('/commands/:id/result', async (req, res, next) => {
     const command = await db.command.findUnique({ where: { id: req.params.id } });
     if (!command) throw Errors.notFound('Command not found.');
     await requireAgent({ header: (n: string) => req.header(n), params: { id: command.computerId } });
-    if (TERMINAL.has(command.status)) {
-      // Already finished: accept retransmissions idempotently, never rerun.
-      res.json(await toCommandRecord(command));
-      return;
-    }
-    const last = await db.commandEvent.findFirst({
-      where: { commandId: command.id },
-      orderBy: { sequence: 'desc' },
-    });
-    const lastSeq = last?.sequence ?? 0;
-    if (body.sequence <= lastSeq) {
-      res.json(await toCommandRecord(command)); // stale/duplicate delivery
-      return;
-    }
-    await db.commandEvent.create({
-      data: {
-        commandId: command.id,
-        sequence: body.sequence,
-        eventType: body.status,
-        payloadRedact: {},
-      },
-    });
-    const terminal = TERMINAL.has(body.status);
-    await db.command.update({
-      where: { id: command.id },
-      data: {
-        status: body.status,
-        ...(terminal && body.result ? { resultRedacted: redactResult(body.result) as object } : {}),
-        ...(terminal && body.error ? { errorCode: body.error.code } : {}),
-      },
-    });
-    await db.computer.update({
-      where: { id: command.computerId },
-      data: { lastSeenAt: new Date() },
-    });
-    const updated = await db.command.findUniqueOrThrow({ where: { id: command.id } });
+    const updated = await applyCommandResult(command.id, body);
+    getRealtimeHub()?.hintCommandResult(command.computerId, command.id);
     res.json(await toCommandRecord(updated));
   } catch (err) {
     next(err);

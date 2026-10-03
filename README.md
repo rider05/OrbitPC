@@ -41,6 +41,17 @@ remote-pc-control/
 - `docs/threat-model.md` — threats, mitigations, review gate.
 - `docs/runbook.md` — dev/prod ops, incidents, release checklist.
 
+## Realtime relay (M3)
+
+- Agent WSS: `wss://<host>/agent?computerId=<id>` with `Authorization: Bearer <device credential>`.
+  Heartbeat (`presence.heartbeat`/`pong`), pending command push on connect + on submit,
+  result ingestion (persisted like the REST relay, then hinted to the owner), `revoked` close.
+- Mobile hint channel: socket.io namespace `/socket`, JWT handshake auth, `auth.refresh` re-auth,
+  `command.result` hints. HTTPS polling remains authoritative (plan.md §6).
+- Rate limit: baseline 300 req/min per IP; tighter per-action and login limits apply.
+- Refresh-token reuse revokes the session immediately and closes its sockets.
+- Revocation (`DELETE /computers/:id`, logout) closes the relevant sockets immediately.
+
 ## Dev (once M0 lands)
 
 1. `docker compose -f infra/docker/compose.yml up postgres redis`

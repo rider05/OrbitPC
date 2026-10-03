@@ -21,7 +21,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "vitest": "^2.1.8"
   },
   "scripts": {
     "start": "expo start",
@@ -29,7 +30,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"no tests yet (mobile track: add secure-store + reconciliation tests before M2b)\" && exit 0"
+    "test": "vitest run"
   },
   "private": true
 }

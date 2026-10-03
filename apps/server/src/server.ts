@@ -1,13 +1,16 @@
 import 'dotenv/config';
-import type { Server } from 'node:http';
+import { createServer } from 'node:http';
 import app, { createApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './lib/logger.js';
+import { attachRealtime } from './realtime/index.js';
 
-let server: Server | undefined;
+let server: ReturnType<typeof createServer> | undefined;
 
 if (!process.env.VERCEL) {
-  server = app.listen(env.PORT, () => {
+  server = createServer(app);
+  attachRealtime(server);
+  server.listen(env.PORT, () => {
     logger.info({ port: env.PORT, nodeEnv: env.NODE_ENV }, 'orbit-server listening');
   });
 

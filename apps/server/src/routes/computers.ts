@@ -5,6 +5,7 @@ import { ApiError } from '../lib/errors.js';
 import { db } from '../lib/db.js';
 import { safeEqualHex, sha256Hex } from '../lib/secrets.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { getRealtimeHub } from '../realtime/index.js';
 
 export const computersRouter = Router();
 
@@ -103,6 +104,8 @@ computersRouter.delete('/:id', requireAuth, async (req, res, next) => {
         },
       }),
     ]);
+    // Revocation must close the agent's live socket immediately (plan.md §M3).
+    getRealtimeHub()?.closeAgentSockets(computer.id);
     res.json({ ok: true });
   } catch (err) {
     next(err);

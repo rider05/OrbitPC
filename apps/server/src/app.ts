@@ -7,6 +7,7 @@ import { corsOrigins, env } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { errorHandler, notFound } from './middleware/errors.js';
 import { requestId } from './middleware/requestId.js';
+import { createRateLimiter } from './middleware/rateLimit.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './routes/auth.js';
 import { pairingRouter } from './routes/pairing.js';
@@ -70,6 +71,9 @@ export function createApp(): express.Express {
   });
 
   app.use(requestId);
+  // Baseline flood protection on all routes (per-IP sliding window, 300/min).
+  // Login/commands already have tighter per-action limits.
+  app.use(createRateLimiter({ windowMs: 60_000, max: 300, scope: 'global' }));
   app.use(
     pinoHttp({
       logger,

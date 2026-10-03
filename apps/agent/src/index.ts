@@ -222,10 +222,21 @@ async function main(): Promise<void> {
 
   // (Unpaired fresh starts pair via the QR-first flow above; --mock-server
   // needs no credential.)
+  const rawWsUrl = process.env.ORBITPC_SERVER_URL || `${httpBase.replace(/^http/, "ws")}/agent`;
+  const wsUrlWithComputer = (() => {
+    try {
+      const u = new URL(rawWsUrl);
+      u.searchParams.set("computerId", computerId);
+      return u.toString();
+    } catch {
+      return rawWsUrl;
+    }
+  })();
   connection = new ConnectionManager({
-    serverUrl: config.serverUrl,
+    serverUrl: wsUrlWithComputer,
     credentialId: effectiveCredentialId,
     signNonce: () => null, // wired to Ed25519 key once enrolled
+    getAgentToken: () => liveCredential,
     onCommandRequest: (raw) => {
       const parsed = commandRequestSchema.safeParse(raw);
       if (!parsed.success) return; // fail closed
